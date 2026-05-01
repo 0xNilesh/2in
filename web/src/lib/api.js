@@ -111,3 +111,14 @@ export const chainApi = {
       body: JSON.stringify({ tokenId, delegate, txHash }),
     }).then(unwrap),
 };
+
+export const toolsApi = {
+  list: () => fetch(url('/api/tools')).then(unwrap),
+  get: (name) => fetch(url(`/api/tools/${encodeURIComponent(name)}`)).then(unwrap),
+  invoke: (name, input, opts = {}) =>
+    fetch(url(`/api/tools/${encodeURIComponent(name)}`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input, ...opts }),
+    }).then(unwrap),
+};

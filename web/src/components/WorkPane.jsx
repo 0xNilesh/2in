@@ -114,9 +114,13 @@ function Step({ step }) {
           {step.tools.map((t, i) => (
             <div key={i} className="work-tool">
               <code className="work-tool-name">{t.name}</code>
-              <span className="work-tool-args">{t.args}</span>
+              <span className="work-tool-args">
+                {typeof t.args === 'string' ? t.args : JSON.stringify(t.args)}
+              </span>
               <span className="work-tool-arrow">→</span>
-              <span className="work-tool-result">{t.result}</span>
+              <span className="work-tool-result">
+                {typeof t.result === 'string' ? t.result : JSON.stringify(t.result)}
+              </span>
             </div>
           ))}
         </div>
