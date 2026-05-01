@@ -4,7 +4,7 @@
 
 import type { z, ZodTypeAny } from 'zod';
 
-export type ToolCategory = 'memory' | 'storage' | 'compute' | 'workflow';
+export type ToolCategory = 'memory' | 'storage' | 'compute' | 'workflow' | 'media';
 
 export interface ToolContext {
   /** master twin id — used by memory tools to scope KV streams. Default '42'. */

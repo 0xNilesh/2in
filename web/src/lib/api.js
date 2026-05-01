@@ -155,3 +155,12 @@ export const toolsApi = {
       body: JSON.stringify({ input, ...opts }),
     }).then(unwrap),
 };
+
+export const uploadApi = {
+  /** Multipart upload — returns { url, mimeType, sizeBytes, filename }. */
+  send: (file) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return fetch(url('/api/upload'), { method: 'POST', body: fd }).then(unwrap);
+  },
+};

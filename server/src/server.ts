@@ -4,6 +4,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import sensible from '@fastify/sensible';
+import multipart from '@fastify/multipart';
 import { config, corsOrigins, isProd } from './config.js';
 import { registerErrorHandler } from './plugins/error-handler.js';
 import { healthRoutes } from './routes/health.js';
@@ -17,6 +18,7 @@ import { chainRoutes } from './routes/chain.js';
 import { finetuneRoutes } from './routes/finetune.js';
 import { toolsRoutes } from './routes/tools.js';
 import { feedbackRoutes } from './routes/feedback.js';
+import { uploadRoutes } from './routes/upload.js';
 
 export async function buildServer(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -39,6 +41,9 @@ export async function buildServer(): Promise<FastifyInstance> {
     origin: corsOrigins,
     credentials: true,
   });
+  await app.register(multipart, {
+    limits: { fileSize: 200 * 1024 * 1024 }, // 200MB cap per upload
+  });
 
   registerErrorHandler(app);
 
@@ -55,6 +60,7 @@ export async function buildServer(): Promise<FastifyInstance> {
       await api.register(finetuneRoutes);
       await api.register(toolsRoutes);
       await api.register(feedbackRoutes);
+      await api.register(uploadRoutes);
     },
     { prefix: '/api' },
   );
