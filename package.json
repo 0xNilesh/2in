@@ -1,0 +1,17 @@
+{
+  "name": "2in",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Your digital twin · creator team of specialist iNFTs on 0G",
+  "scripts": {
+    "dev": "concurrently -k -n web,api -c cyan,magenta \"npm --prefix web run dev\" \"npm --prefix server run dev\"",
+    "dev:web": "npm --prefix web run dev",
+    "dev:api": "npm --prefix server run dev",
+    "build": "npm --prefix server run build && npm --prefix web run build",
+    "typecheck": "npm --prefix server run typecheck",
+    "install:all": "npm install --prefix web && npm install --prefix server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}

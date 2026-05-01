@@ -1,0 +1,29 @@
+# Dependencies
+node_modules
+**/node_modules
+
+# Build output
+dist
+**/dist
+out
+cache
+broadcast
+
+# Env (keep .env.example checked in)
+.env
+.env.local
+.env.*
+!.env.example
+!**/.env.example
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+
+# Editor / agent state — not committing for now
+.claude/
+
+# Docs — not committing markdown for now per preference
+*.md
