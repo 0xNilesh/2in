@@ -15,7 +15,7 @@ land on chain as the team learns.
 |---|---|
 | **Live demo** | _add Vercel URL after deploy_ |
 | **Demo video** | _add YouTube link after recording (≤ 3 min)_ |
-| **TwinINFT contract (Galileo)** | _add address after `forge script ... --broadcast`_ |
+| **TwinINFT contract (Galileo)** | [`0xf454c04ee5365f9a195a00267e4a1dba6a7b9395`](https://chainscan-galileo.0g.ai/address/0xf454c04ee5365f9a195a00267e4a1dba6a7b9395) |
 | **Explorer** | https://chainscan-galileo.0g.ai |
 | **Source** | this repo |
 | **Team** | _add Telegram + X handles_ |
