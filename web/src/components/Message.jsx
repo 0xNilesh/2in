@@ -6,9 +6,54 @@
 // Body parts are arrays of strings + tagged objects ({ code }, { strong }, { ok })
 // so we can render rich inline content without dangerouslySetInnerHTML.
 
+import { useState } from 'react';
 import { Avatar } from './Avatar.jsx';
 import { TaskCard } from './TaskCard.jsx';
 import { getSpecialist } from '../data/specialists.js';
+
+// Extract plain text from any body shape so we can copy / save it.
+function bodyToText(body) {
+  if (!body) return '';
+  const parts = [];
+  const flat = (arr) => Array.isArray(arr) ? arr.map((p) => typeof p === 'string' ? p : p.strong ?? p.code ?? p.ok ?? '').join('') : String(arr ?? '');
+  if (body.intro) parts.push(flat(body.intro));
+  if (body.text) parts.push(flat(body.text));
+  if (body.draft) parts.push(flat(body.draft));
+  if (body.hooks) parts.push(body.hooks.join('\n'));
+  return parts.filter(Boolean).join('\n').trim();
+}
+
+function CopyButton({ text, label = 'copy' }) {
+  const [copied, setCopied] = useState(false);
+  if (!text) return null;
+  const onClick = async (e) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1400);
+    } catch { /* ignore */ }
+  };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        background: 'transparent',
+        border: '1px solid var(--border)',
+        color: copied ? 'var(--mint)' : 'var(--text-faint)',
+        padding: '2px 8px',
+        borderRadius: 999,
+        fontSize: 10.5,
+        fontFamily: 'Geist Mono, monospace',
+        cursor: 'pointer',
+      }}
+      title="Copy to clipboard"
+    >
+      {copied ? '✓ copied' : label}
+    </button>
+  );
+}
 
 function renderInline(parts) {
   if (!Array.isArray(parts)) return parts;
@@ -92,6 +137,7 @@ export function Message({ msg, onSavePreference }) {
         <div className="user-bubble">{renderInline(Array.isArray(msg.text) ? msg.text : [msg.text])}</div>
         <div className="meta" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <span>{msg.ts}</span>
+          <CopyButton text={text} />
           {onSavePreference ? (
             <button
               type="button"
@@ -120,6 +166,8 @@ export function Message({ msg, onSavePreference }) {
   const isDirector = msg.from === 'director';
   const initial = speaker?.initial ?? '?';
 
+  const plainText = bodyToText(msg.body);
+
   return (
     <div className={`msg${isLive ? ' live-msg' : ''}`}>
       <div className={`mav${isDirector ? ' dir' : ''}`}>{initial}</div>
@@ -131,6 +179,7 @@ export function Message({ msg, onSavePreference }) {
             <span className={`step${msg.step === 'live' ? ' live' : ''}`}>{msg.step}</span>
           ) : null}
           <span className={`ts${isLive ? ' live' : ''}`}>{msg.ts}</span>
+          {!isLive && plainText ? <CopyButton text={plainText} /> : null}
         </div>
         <div className="body">
           <MessageBody body={msg.body} />

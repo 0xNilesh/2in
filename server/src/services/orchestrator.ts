@@ -51,6 +51,16 @@ export interface Pattern {
 }
 
 export const PATTERNS: Record<string, Pattern> = {
+  'answer': {
+    id: 'answer',
+    title: 'answer',
+    description: 'Single Researcher step. Use for pure Q&A — "tell me about X", "who is X", "what is X". Returns an informed answer using episodic/temporal memory + the model\'s own knowledge. Do NOT use when the user wants something written or produced — use daily-post for that.',
+    steps: [
+      {
+        idx: 1, agent: 'researcher', label: 'Pull context + answer the question',
+      },
+    ],
+  },
   'daily-post': {
     id: 'daily-post',
     title: 'daily-post',
@@ -223,15 +233,19 @@ If no pattern is a clean fit, default to "daily-post".`;
 
 function regexFallback(userInput: string): string {
   const lower = userInput.toLowerCase();
+  // Q&A / lookup queries — single Researcher answer, no Writer/Editor.
+  if (/^(who is|what is|tell me about|explain|describe|when did|where (is|did)|why (is|do))/.test(lower)) return 'answer';
   if (/(weekly review|review the week|swarm review|how (did|was) (this |last )?week|review my week)/.test(lower)) return 'weekly-review';
-  if (/(weekly plan|plan|theme|cadence|schedule|roadmap)/.test(lower)) return 'weekly-plan';
+  if (/(weekly plan|plan my|theme|cadence|schedule|roadmap)/.test(lower)) return 'weekly-plan';
   if (/(audit|recap|score|reflection)/.test(lower)) return 'audit-week';
   if (/(dm|reply|message|email|respond)/.test(lower)) return 'dm-reply';
   if (/(sponsor|brand|deal|paid|#ad|endorsement|negotiate)/.test(lower)) return 'sponsor-reply';
   if (/(image|cover|picture|art|visual|reel)/.test(lower)) return 'visual-post';
   if (/(clip|short|episode|podcast|trim|highlight|transcribe)/.test(lower)) return 'clip-shorts';
-  if (/(stani|aave|founder|who is|tell me about|news|trending|fact)/.test(lower)) return 'with-research';
-  return 'daily-post';
+  // Production verbs → with-research (Researcher → Writer → Editor)
+  if (/(draft|write|compose|generate|make me|create me|post about|tweet about)/.test(lower)) return 'with-research';
+  // Default for ambiguous input — answer rather than over-produce.
+  return 'answer';
 }
 
 export async function routePattern(userInput: string, ctx: PromptContext): Promise<{ pattern: Pattern; source: 'llm' | 'regex' }> {
@@ -426,14 +440,18 @@ async function runPattern({ taskId, initial, input }: RunArgs): Promise<void> {
     emit(taskId, { type: 'step.done', idx: step.idx, output, elapsed });
     stepOutputs.push({ agent: step.agent, output });
 
-    // Memory write — passthrough each specialist's output to its primary
-    // write type. Skips LLM extraction (would burn req/min budget); the
-    // specialist's full output is treated as one event-shaped entry.
+    // Memory write — store a SUMMARY of the specialist's output, not the
+    // full thing. Writers + Editors output paragraphs of content; if we
+    // stored everything verbatim memory bloats fast and retrieval gets noisy.
+    // We summarise locally (no LLM cost) by trimming to the first sentence
+    // capped at ~140 chars + tagging by agent + step. Reinforcement dedupes
+    // identical summaries across runs.
     if (memCfg.writes.length > 0 && output.length > 8) {
       const writeType = memCfg.writes[0]!;
+      const summary = summariseForMemory(output, step.agent, input.goal);
       try {
         const stored = await memEncode(
-          { kind: 'specialist-output', text: output, source: step.agent },
+          { kind: 'specialist-output', text: summary, source: step.agent },
           { twinId, agent: step.agent, passthrough: { type: writeType } },
         );
         recordEncode(step.agent, stored);
@@ -496,6 +514,21 @@ function buildMessages(
   }
 
   return messages;
+}
+
+// Cheap local summariser. Pulls the first sentence (or first ~140 chars)
+// from a specialist's output and prefixes it with a "<agent>: <goal>" tag
+// so the entry reads as a memory of *what was decided* rather than the
+// raw text dump. Future: swap for a real LLM extraction call once we're
+// off the 10 req/min ceiling.
+function summariseForMemory(output: string, agent: string, goal: string): string {
+  const firstLine = output.split(/\n/).map((s) => s.trim()).find((s) => s.length > 0) ?? output;
+  const firstSentence = firstLine.split(/(?<=[.!?])\s+/)[0] ?? firstLine;
+  const trimmed = firstSentence.length > 140
+    ? firstSentence.slice(0, 137).trimEnd() + '…'
+    : firstSentence;
+  const goalTag = goal.length > 60 ? goal.slice(0, 57) + '…' : goal;
+  return `${agent} on "${goalTag}": ${trimmed}`;
 }
 
 function summarise(value: unknown): unknown {
