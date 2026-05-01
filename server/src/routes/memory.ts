@@ -10,7 +10,20 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { storage } from '../services/storage.js';
+import { recordWrite } from '../services/snapshot.js';
 import crypto from 'node:crypto';
+
+// Map slices to a default "owner" specialist for snapshot bookkeeping when
+// the route doesn't carry an explicit specialistId. voice/rejection are
+// Quill-owned by convention in our roster; preference + relationship +
+// performance are master-twin (director) writes.
+const DEFAULT_OWNER: Record<string, string> = {
+  voice: 'quill',
+  rejection: 'mark',
+  preference: 'director',
+  relationship: 'director',
+  performance: 'director',
+};
 
 const SLICES = ['voice', 'preference', 'performance', 'rejection', 'relationship'] as const;
 type Slice = typeof SLICES[number];
@@ -50,13 +63,25 @@ export async function memoryRoutes(app: FastifyInstance): Promise<void> {
     const body = WriteBody.parse(req.body);
     const stream = streamId(body.twin, slice);
     const key = `m-${crypto.randomBytes(6).toString('hex')}`;
+    const provenance = body.who ?? 'manual';
     const payload = JSON.stringify({
-      who: body.who ?? 'manual',
+      who: provenance,
       text: body.value,
       ts: Date.now(),
     });
     await storage.writeKv(stream, key, payload);
-    return { key, stream };
+
+    // Tick the snapshot counter for the slice's owner specialist. Manual
+    // writes via this endpoint count as 'manual' provenance unless the
+    // caller passed a different `who`.
+    const owner = DEFAULT_OWNER[slice] ?? 'director';
+    const trigger = provenance === 'manual' ? 'manual' : provenance === 'tool' ? 'tool' : 'feedback';
+    const { snapshot, pending } = recordWrite({
+      specialistId: owner,
+      slice,
+      triggeredBy: trigger as 'manual' | 'tool' | 'feedback',
+    });
+    return { key, stream, snapshot, pendingWrites: pending };
   });
 
   app.get('/memory/:slice/root', async (req) => {
