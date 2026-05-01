@@ -12,7 +12,7 @@
 // touches `realChatStream`.
 
 import { config } from '../config.js';
-import { ethers } from 'ethers';
+import { getBroker, isBrokerConfigured } from './broker.js';
 
 export type ChatRole = 'system' | 'user' | 'assistant';
 export interface ChatMessage {
@@ -40,10 +40,8 @@ export interface ComputeMode {
 }
 
 export class ComputeService {
-  private brokerPromise: Promise<unknown> | null = null;
-
   get mode(): ComputeMode {
-    if (config.BROKER_PRIVATE_KEY) return { kind: 'real' };
+    if (isBrokerConfigured()) return { kind: 'real' };
     return {
       kind: 'mock',
       reason: 'BROKER_PRIVATE_KEY not set — running in mock mode',
@@ -54,9 +52,7 @@ export class ComputeService {
     if (this.mode.kind === 'mock') {
       return { mode: 'mock', providers: [] };
     }
-    const broker = await this.broker();
-    // The broker SDK exposes a list method on its inference handle — we
-    // intentionally call it loosely-typed because the surface is in flux.
+    const broker = await getBroker();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return await (broker as any)?.inference?.listService?.();
   }
@@ -72,46 +68,12 @@ export class ComputeService {
     yield* this.realChatStream(messages, opts);
   }
 
-  // === real broker path ============================================
-  private async broker(): Promise<unknown> {
-    if (!this.brokerPromise) {
-      this.brokerPromise = this.initBroker().catch((err) => {
-        this.brokerPromise = null;
-        throw err;
-      });
-    }
-    return this.brokerPromise;
-  }
-
-  private async initBroker(): Promise<unknown> {
-    if (!config.BROKER_PRIVATE_KEY) {
-      throw new Error('BROKER_PRIVATE_KEY not set');
-    }
-    const provider = new ethers.JsonRpcProvider(config.BROKER_RPC);
-    const wallet = new ethers.Wallet(config.BROKER_PRIVATE_KEY, provider);
-    // Dynamic import keeps the SDK out of the cold start when running mock.
-    const mod = await import('@0glabs/0g-serving-broker');
-    // The exported initializer differs across recent versions. Try a couple
-    // common shapes.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const m = mod as any;
-    const create =
-      m.createZGComputeNetworkBroker ??
-      m.createZGServingNetworkBroker ??
-      m.default?.createZGComputeNetworkBroker;
-    if (typeof create !== 'function') {
-      throw new Error(
-        'Broker SDK shape unrecognized; expected createZGComputeNetworkBroker(...)',
-      );
-    }
-    return await create(wallet);
-  }
-
   private async *realChatStream(
     messages: ChatMessage[],
     opts: ChatStreamOptions,
   ): AsyncGenerator<ChatStreamYield, void, void> {
-    const broker = await this.broker();
+    const broker = await getBroker();
+    if (!broker) throw new Error('broker not initialised');
     // Loose typing on purpose — see initBroker comment.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const b = broker as any;
