@@ -25,6 +25,17 @@ export function useSnapshotToasts() {
           : null,
       });
     });
+    ch.onEvent('snapshot.anchored', ({ snapshot }) => {
+      pushToast({
+        kind: 'mint',
+        title: `Anchored on 0G · ${snapshot.specialistId}`,
+        body: `Memory snapshot on-chain · #${snapshot.tokenId}`,
+        ttlMs: 6000,
+        action: snapshot.txHash
+          ? { label: 'view tx →', href: `https://chainscan-galileo.0g.ai/tx/${snapshot.txHash}` }
+          : null,
+      });
+    });
 
     return () => {
       ch.close();

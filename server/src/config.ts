@@ -62,6 +62,10 @@ const Schema = z.object({
   CHAIN_RPC: z.string().default('https://evmrpc-testnet.0g.ai'),
   CHAIN_ID: z.coerce.number().default(16602),
   CHAIN_EXPLORER: z.string().default('https://chainscan-galileo.0g.ai'),
+  // Signer key for server-issued chain writes (snapshot-driven
+  // updateMetadata). Falls back to STORAGE_PRIVATE_KEY in the chain
+  // service so the demo works with a single .env key.
+  CHAIN_PRIVATE_KEY: z.string().optional(),
 });
 
 const parsed = Schema.safeParse(process.env);

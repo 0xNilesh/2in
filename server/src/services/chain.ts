@@ -27,6 +27,7 @@ export interface ChainMode {
 
 class ChainService {
   private clientPromise: Promise<unknown> | null = null;
+  private walletPromise: Promise<unknown> | null = null;
 
   get mode(): ChainMode {
     if (config.CHAIN_CONTRACT_ADDRESS) {
@@ -42,6 +43,13 @@ class ChainService {
       contractAddress: null,
       chainId: config.CHAIN_ID,
     };
+  }
+
+  /** Server-issued writes (snapshot updateMetadata). True iff a signer key
+   *  is available and a contract address is configured. */
+  get canWrite(): boolean {
+    if (!config.CHAIN_CONTRACT_ADDRESS) return false;
+    return Boolean(config.CHAIN_PRIVATE_KEY ?? config.STORAGE_PRIVATE_KEY);
   }
 
   explorerUrl(tokenId: number): string {
@@ -72,6 +80,56 @@ class ChainService {
       })();
     }
     return this.clientPromise;
+  }
+
+  /** Write `updateMetadata(tokenId, dataHash, encryptedURI)`. Throws on
+   *  signer / contract config issues; returns the tx hash on success. */
+  async updateMetadata(
+    tokenId: number,
+    dataHash: `0x${string}`,
+    encryptedURI: string,
+  ): Promise<{ txHash: string; blockNumber: number; explorerUrl: string }> {
+    if (!this.canWrite) throw new Error('chain.canWrite=false (no signer or no contract)');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const wallet = (await this.wallet()) as any;
+    const txHash = (await wallet.writeContract({
+      address: config.CHAIN_CONTRACT_ADDRESS,
+      abi: TWIN_INFT_ABI,
+      functionName: 'updateMetadata',
+      args: [BigInt(tokenId), dataHash, encryptedURI],
+      gas: 200_000n,
+    })) as `0x${string}`;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const c = (await this.client()) as any;
+    const receipt = await c.waitForTransactionReceipt({ hash: txHash });
+    return {
+      txHash,
+      blockNumber: Number(receipt.blockNumber),
+      explorerUrl: this.txExplorerUrl(txHash),
+    };
+  }
+
+  private async wallet(): Promise<unknown> {
+    if (!this.walletPromise) {
+      this.walletPromise = (async () => {
+        const { createWalletClient, http } = await import('viem');
+        const { privateKeyToAccount } = await import('viem/accounts');
+        const raw = config.CHAIN_PRIVATE_KEY ?? config.STORAGE_PRIVATE_KEY;
+        if (!raw) throw new Error('no chain signer key');
+        const key = (raw.startsWith('0x') ? raw : `0x${raw}`) as `0x${string}`;
+        const account = privateKeyToAccount(key);
+        return createWalletClient({
+          account,
+          chain: { id: config.CHAIN_ID, name: 'galileo', nativeCurrency: { name: '0G', symbol: '0G', decimals: 18 }, rpcUrls: { default: { http: [config.CHAIN_RPC] } } } as never,
+          transport: http(config.CHAIN_RPC),
+        });
+      })().catch((err) => {
+        this.walletPromise = null;
+        throw err;
+      });
+    }
+    return this.walletPromise;
   }
 
   private async realGetTwin(tokenId: number): Promise<TwinNftState | null> {

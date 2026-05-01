@@ -18,6 +18,9 @@
 
 import crypto from 'node:crypto';
 import { createBus } from '../lib/event-bus.js';
+import { storage } from './storage.js';
+import { chain } from './chain.js';
+import { listAll, MEMORY_TYPES, type MemoryType } from './memory.js';
 
 export interface SnapshotRecord {
   idx: number;
@@ -41,6 +44,7 @@ export interface WriteRecord {
 
 export type SnapshotEvent =
   | { type: 'snapshot.created'; snapshot: SnapshotRecord }
+  | { type: 'snapshot.anchored'; snapshot: SnapshotRecord }
   | { type: 'write.recorded'; write: WriteRecord; pending: number };
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -130,7 +134,80 @@ export function recordWrite(input: {
   writeCounters.set(input.specialistId, []);
   const snapshot = createSnapshot(input.specialistId, recent);
   snapshotBus.emit('all', { type: 'snapshot.created', snapshot });
+  // Kick off the chain anchor in the background. The synchronous emit
+  // above keeps the UI responsive; the second `snapshot.anchored` event
+  // upgrades the record's txHash + source when the receipt confirms.
+  void anchorOnChain(snapshot).catch((err) => {
+    // eslint-disable-next-line no-console
+    console.warn(`[snapshot] anchor failed for #${snapshot.tokenId}: ${(err as Error).message}`);
+  });
   return { snapshot, pending: 0 };
+}
+
+// === Chain anchoring ========================================================
+// Build a manifest of per-type root hashes, upload to 0G Storage, then call
+// updateMetadata(tokenId, manifestHash, manifestGatewayUrl). Updates the
+// snapshot record in-place and re-emits as 'snapshot.anchored'.
+async function anchorOnChain(snapshot: SnapshotRecord): Promise<void> {
+  const twinId = '42';
+  const all = await listAll(twinId);
+  const manifest: {
+    twin: string;
+    specialistId: string;
+    tokenId: number;
+    snapshotAt: number;
+    types: Record<MemoryType, { count: number; root: string }>;
+  } = {
+    twin: twinId,
+    specialistId: snapshot.specialistId,
+    tokenId: snapshot.tokenId,
+    snapshotAt: snapshot.ts,
+    types: {} as Record<MemoryType, { count: number; root: string }>,
+  };
+  for (const type of MEMORY_TYPES) {
+    const entries = all[type] ?? [];
+    const root = '0x' + crypto
+      .createHash('sha256')
+      .update(JSON.stringify(entries.map((e) => ({ id: e.id, text: e.text, ts: e.ts }))))
+      .digest('hex');
+    manifest.types[type] = { count: entries.length, root };
+  }
+
+  const manifestBuf = Buffer.from(JSON.stringify(manifest));
+  let upload;
+  try {
+    upload = await storage.uploadBlob(manifestBuf, { contentType: 'application/json' });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(`[snapshot] manifest upload failed: ${(err as Error).message}`);
+    return;
+  }
+
+  // dataHash = keccak-style integrity over the uploaded blob. We use sha256
+  // for now (chain takes bytes32 — any 32B hash satisfies the field) so we
+  // don't drag in a full keccak dep just for this. Switch to keccak later
+  // if ERC-7857 verifiers require it.
+  const dataHash = ('0x' + crypto.createHash('sha256').update(manifestBuf).digest('hex')) as `0x${string}`;
+
+  if (!chain.canWrite) {
+    // No signer — leave snapshot at source: 'mock' with the deterministic txHash.
+    return;
+  }
+
+  let receipt;
+  try {
+    receipt = await chain.updateMetadata(snapshot.tokenId, dataHash, upload.gatewayUrl);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(`[snapshot] updateMetadata failed for #${snapshot.tokenId}: ${(err as Error).message}`);
+    return;
+  }
+
+  // Patch the record in-place + re-emit so SSE listeners can swap their UI.
+  snapshot.txHash = receipt.txHash;
+  snapshot.source = 'chain';
+  snapshot.toHash = dataHash.slice(0, 6) + '…' + dataHash.slice(-4);
+  snapshotBus.emit('all', { type: 'snapshot.anchored', snapshot });
 }
 
 function createSnapshot(specialistId: string, recent: WriteRecord[]): SnapshotRecord {
