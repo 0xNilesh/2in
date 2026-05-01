@@ -8,7 +8,7 @@
 // in localStorage, so they survive page navigation within the session).
 
 import { useEffect, useState, useMemo, useRef } from 'react';
-import { useParams, useSearchParams, Navigate, Link, useNavigate } from 'react-router-dom';
+import { useParams, useSearchParams, Navigate, Link, useNavigate, useLocation } from 'react-router-dom';
 import { Composer } from '../components/Composer.jsx';
 import { Message } from '../components/Message.jsx';
 import { Avatar } from '../components/Avatar.jsx';
@@ -16,7 +16,8 @@ import { getThread, defaultDirectorThreadId, threads as seedThreads } from '../d
 import { useTwin } from '../hooks/useTwin.js';
 import { useStreamingChat } from '../hooks/useStreamingChat.js';
 import { ROUTES } from '../lib/routes.js';
-import { taskApi } from '../lib/api.js';
+import { taskApi, finetuneApi } from '../lib/api.js';
+import { specialists as rosterSpecialists } from '../data/specialists.js';
 
 const EXT_KEY = '2in:thread-ext';
 
@@ -64,11 +65,20 @@ export default function Chat() {
   );
 }
 
+function readCorpus() {
+  try { return JSON.parse(window.localStorage.getItem('2in:corpus:twitter') ?? 'null'); }
+  catch { return null; }
+}
+
+const BANNER_THRESHOLD = 25; // demo dataset has 25 tweets; tune for archive uploads
+
 function ChatBody({ threadId, twin, seed, onNewChat, openTask }) {
   const [extension, setExtension] = useState(() => readExt()[threadId] ?? []);
   const { send, isStreaming, partial, error, taskCue } = useStreamingChat({ target: 'director' });
   const scrollRef = useRef(null);
   const lastTaskCueRef = useRef(null);
+  const nav = useNavigate();
+  const loc = useLocation();
 
   // Persist extension to localStorage whenever it changes.
   useEffect(() => {
@@ -140,6 +150,36 @@ function ChatBody({ threadId, twin, seed, onNewChat, openTask }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isStreaming, taskCue]);
 
+  // Director fine-tune banner — surface when the corpus crosses threshold
+  // and the writer specialist (Quill) has no adapter yet. Dismissible.
+  const corpus = readCorpus();
+  const corpusSize = corpus?.tweets?.length ?? 0;
+  const quill = rosterSpecialists.find((s) => s.id === 'quill');
+  const adapterMissing = !quill?.adapterURI;
+  const dismissedKey = '2in:banner:dismissed:quill';
+  const [bannerDismissed, setBannerDismissed] = useState(() => {
+    try { return Boolean(window.localStorage.getItem(dismissedKey)); }
+    catch { return false; }
+  });
+  const showBanner = corpusSize >= BANNER_THRESHOLD && adapterMissing && !bannerDismissed;
+  const dismissBanner = () => {
+    try { window.localStorage.setItem(dismissedKey, '1'); } catch {}
+    setBannerDismissed(true);
+  };
+  const trainQuill = async () => {
+    try {
+      const job = await finetuneApi.start('quill', {
+        baseModel: 'Qwen2.5-0.5B-Instruct',
+        datasetUri: corpus?.rootHash ?? '0g://corpus/twitter',
+      });
+      // Replace ?task with ?finetune so the FineTunePane mounts.
+      nav(`${loc.pathname}?finetune=${encodeURIComponent(job.id)}`, { replace: true });
+    } catch (err) {
+      // eslint-disable-next-line no-alert
+      alert(err.message ?? 'training_start_failed');
+    }
+  };
+
   const handleSend = (text) => {
     setExtension((ext) => [
       ...ext,
@@ -183,6 +223,44 @@ function ChatBody({ threadId, twin, seed, onNewChat, openTask }) {
       <div className="scroll" ref={scrollRef}>
         <div className="stream">
           <div className="day">{seed.day}</div>
+          {showBanner ? (
+            <div
+              style={{
+                padding: '14px 16px',
+                background: 'var(--peach-04)',
+                border: '1px solid var(--peach)',
+                borderRadius: 12,
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 12,
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontFamily: 'Geist Mono, monospace',
+                    letterSpacing: '0.1em',
+                    textTransform: 'uppercase',
+                    color: 'var(--peach)',
+                  }}
+                >
+                  {twin.name} · suggestion
+                </div>
+                <div style={{ marginTop: 6, color: 'var(--text)', fontSize: 14 }}>
+                  Quill is ready to be trained on {corpusSize} new tweets.
+                  Train now to lock in your voice as a LoRA adapter.
+                </div>
+                <div style={{ marginTop: 4, fontSize: 11.5, color: 'var(--text-mute)' }}>
+                  cost · 0.5 0G  ·  ~30 min  ·  Qwen2.5-0.5B-Instruct base
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button className="btn btn-peach" onClick={trainQuill}>Train Quill →</button>
+                <button className="btn btn-ghost" onClick={dismissBanner}>Later</button>
+              </div>
+            </div>
+          ) : null}
           {allMessages.map((m, i) => <Message key={i} msg={m} />)}
           {isStreaming && partial ? (
             <Message
