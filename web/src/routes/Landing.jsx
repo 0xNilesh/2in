@@ -20,8 +20,8 @@ export default function Landing() {
         <div className="brand">2<em>in</em></div>
         <div className="nav-links">
           <a href="#how">How it works</a>
-          <a href="#team">Your team</a>
-          <a href="#memory">Memory</a>
+          <a href="#team">Specialists</a>
+          <a href="#memory">Memory core</a>
           <a href="#chain">On-chain</a>
         </div>
         <div className="nav-cta" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -44,14 +44,15 @@ export default function Landing() {
 
       <section className="hero">
         <div>
-          <div className="hero-eyebrow">your digital twin · on 0G</div>
+          <div className="hero-eyebrow">memory-driven digital twin · on 0G</div>
           <h1 className="hero-title">
-            A swarm that thinks <em>like you</em>. Working for you 24/7.
+            What you've <em>lived</em> + what you've been told = your AI.
           </h1>
           <p className="hero-sub">
-            We learn your voice from your social media, mint a roster of specialist
-            agents, and let them collaborate on your tasks while you sleep. Each
-            specialist is its own iNFT — yours forever.
+            A memory core that grows over time. Six typed slices — episodic, semantic,
+            relationship, temporal, procedural, working — anchored on 0G Storage and
+            owned through your iNFT roster. Specialists read + write through it. Your
+            identity emerges from memory, not configuration.
           </p>
           <div className="hero-actions">
             <button className="btn-cta" onClick={enter}>
@@ -94,10 +95,10 @@ export default function Landing() {
           <div className="hero-line h l4"></div>
 
           <div className="hero-twin">2<em>in</em></div>
-          <div className="hero-spec s1">Q<span className="role-mini">Writer</span></div>
-          <div className="hero-spec s2">C<span className="role-mini">Voice</span></div>
-          <div className="hero-spec s3">M<span className="role-mini">Editor</span></div>
-          <div className="hero-spec s4">M<span className="role-mini">Legal</span></div>
+          <div className="hero-spec s1">W<span className="role-mini">Writer</span></div>
+          <div className="hero-spec s2">R<span className="role-mini">Researcher</span></div>
+          <div className="hero-spec s3">E<span className="role-mini">Editor</span></div>
+          <div className="hero-spec s4">C<span className="role-mini">Companion</span></div>
         </div>
       </section>
 
@@ -118,18 +119,18 @@ export default function Landing() {
           </div>
           <div className="step-card">
             <div className="step-num">02</div>
-            <div className="step-title">Ingest</div>
-            <div className="step-text">We pull your tweets, podcasts, essays. Build your persona.</div>
+            <div className="step-title">Seed memory</div>
+            <div className="step-text">We pull your tweets, podcasts, essays — encode into typed memory.</div>
           </div>
           <div className="step-card">
             <div className="step-num">03</div>
-            <div className="step-title">Name your twin</div>
-            <div className="step-text">Pick what to call your director. It's the one you'll talk to.</div>
+            <div className="step-title">Mint your roster</div>
+            <div className="step-text">Master twin + 5 core specialists, each its own iNFT under your wallet.</div>
           </div>
           <div className="step-card">
             <div className="step-num">04</div>
-            <div className="step-title">Land in chat</div>
-            <div className="step-text">Type a task. Watch the team huddle. Approve. Ship.</div>
+            <div className="step-title">Talk + grow</div>
+            <div className="step-text">Every chat reads + writes memory. The twin sharpens with every approval.</div>
           </div>
         </div>
       </section>
@@ -177,39 +178,62 @@ export default function Landing() {
       </section>
 
       <section id="memory" className="section-band">
-        <div className="section-eyebrow">Memory that evolves</div>
-        <h2 className="section-title">It gets easier to use, not just smarter.</h2>
+        <div className="section-eyebrow">Memory architecture</div>
+        <h2 className="section-title">Six typed slices. Five primitives. One memory core.</h2>
         <p className="section-sub">
-          Every override you make, every rejection, every new performance metric writes
-          to typed memory slices. By job 5 the team asks 0 clarifying questions and ships.
+          Memory is what your AI has lived — interactions, decisions, performance.
+          Every specialist reads its assigned types before drafting, writes back after.
+          Reinforcement promotes entries to <em>stable</em>; the corpus self-consolidates.
+          Snapshot every threshold writes <em>updateMetadata</em> to your iNFT on-chain.
         </p>
 
         <div className="feature-grid">
           <div className="feature">
-            <div className="feature-icon">⌬</div>
-            <div className="feature-title">Voice memory</div>
-            <div className="feature-text">Every shipped post grows the corpus your specialists train against.</div>
-          </div>
-          <div className="feature">
             <div className="feature-icon">◐</div>
-            <div className="feature-title">Preference memory</div>
-            <div className="feature-text">"Avoid superlatives this month." "Never on Sundays." Learned from you, kept forever.</div>
+            <div className="feature-title">Episodic</div>
+            <div className="feature-text">Events that happened. Every shipped post, every conversation. Researcher + Strategist read it daily.</div>
           </div>
           <div className="feature">
-            <div className="feature-icon">⊘</div>
-            <div className="feature-title">Rejection memory</div>
-            <div className="feature-text">What you killed and why. Editor gates every draft against it.</div>
+            <div className="feature-icon">◊</div>
+            <div className="feature-title">Semantic</div>
+            <div className="feature-text">Stable facts about you. "Tone=terse", "host a podcast", "avoid hashtags". Read by every specialist.</div>
+          </div>
+          <div className="feature">
+            <div className="feature-icon">◇</div>
+            <div className="feature-title">Relationship</div>
+            <div className="feature-text">People in your life — collaborators, sponsors. Companion + Negotiator's working set.</div>
+          </div>
+          <div className="feature">
+            <div className="feature-icon">⌒</div>
+            <div className="feature-title">Temporal</div>
+            <div className="feature-text">Time-anchored patterns. "Mornings outperform 3×". Sweep periodically; the truth changes.</div>
+          </div>
+          <div className="feature">
+            <div className="feature-icon">⌬</div>
+            <div className="feature-title">Procedural</div>
+            <div className="feature-text">How-to rules. "No superlatives this month". "#ad on every sponsor post". Editor's gate.</div>
+          </div>
+          <div className="feature">
+            <div className="feature-icon">○</div>
+            <div className="feature-title">Working</div>
+            <div className="feature-text">In-flight scratch — current task only. Cleared on completion. Never persisted, never anchored.</div>
           </div>
         </div>
       </section>
 
       <section id="chain" className="section-band">
         <div className="section-eyebrow">on-chain · ERC-7857</div>
-        <h2 className="section-title">Your twin is yours.</h2>
+        <h2 className="section-title">Your twin is yours. Forever.</h2>
         <p className="section-sub">
-          Every specialist is its own iNFT minted under your wallet. Encrypted intelligence
-          (system prompt + LoRA adapter + memory slices) lives on 0G Storage. Transfer them,
-          delegate them, retire them — they answer to your wallet, not us.
+          Every specialist is its own iNFT minted under your wallet. The memory core
+          lives on 0G Storage; every snapshot writes a Merkle manifest hash to your
+          iNFT via <code style={{ color: 'var(--peach)' }}>updateMetadata</code>.
+          Transfer the token, the memory pointer transfers with it. We shut down,
+          your twin still works.
+        </p>
+        <p className="section-sub" style={{ marginTop: 8 }}>
+          That's the difference from Personal.ai, Delphi, Replika: their memory
+          lives in their cloud. Yours lives in your wallet.
         </p>
       </section>
 
