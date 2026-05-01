@@ -311,8 +311,23 @@ function ChatBody({ threadId, twin, seed, onNewChat, openTask }) {
             />
           ) : null}
           {error ? (
-            <div style={{ padding: '8px 12px', color: 'var(--red)', fontSize: 12.5 }}>
-              {error}
+            <div
+              style={{
+                padding: '12px 14px',
+                background: 'rgba(255,80,80,0.06)',
+                border: '1px solid rgba(255,80,80,0.32)',
+                borderRadius: 10,
+                color: 'var(--red)',
+                fontSize: 12.5,
+                lineHeight: 1.5,
+              }}
+            >
+              <strong>0G compute call failed.</strong> {error}
+              {error.toLowerCase().includes('rate limit') ? (
+                <div style={{ marginTop: 6, color: 'var(--text-mute)' }}>
+                  The provider caps you at 10 req/min. Wait ~60s and retry.
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>

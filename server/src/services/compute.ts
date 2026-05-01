@@ -148,7 +148,16 @@ export class ComputeService {
     opts: ChatStreamOptions = {},
   ): AsyncGenerator<ChatStreamYield, void, void> {
     const m = this.mode;
+
+    // Mock only runs when nothing real is configured. If a real path is
+    // wired (router/broker), failures propagate as errors instead of
+    // silently producing canned responses — the SSE client surfaces the
+    // actual reason in an 'error' event so the UI shows truth.
     if (m.kind === 'mock') {
+      const realConfigured = hasRouter() || isBrokerConfigured();
+      if (realConfigured && (this.routerError || this.brokerError)) {
+        throw new Error(this.routerError ?? this.brokerError ?? m.reason ?? 'compute unavailable');
+      }
       yield* mockChatStream(messages, opts);
       return;
     }
@@ -160,9 +169,8 @@ export class ComputeService {
         this.routerError = (err as Error).message;
         this.routerErrorAt = Date.now();
         // eslint-disable-next-line no-console
-        console.warn(`[compute] ${m.kind} call failed (${this.routerError}) — falling back to mock`);
-        yield* mockChatStream(messages, opts);
-        return;
+        console.warn(`[compute] ${m.kind} call failed (${this.routerError})`);
+        throw err;
       }
     }
     // broker path
@@ -172,8 +180,8 @@ export class ComputeService {
       this.brokerError = (err as Error).message;
       this.brokerErrorAt = Date.now();
       // eslint-disable-next-line no-console
-      console.warn(`[compute] broker call failed (${this.brokerError}) — falling back to mock`);
-      yield* mockChatStream(messages, opts);
+      console.warn(`[compute] broker call failed (${this.brokerError})`);
+      throw err;
     }
   }
 
