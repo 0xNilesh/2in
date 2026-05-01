@@ -56,9 +56,13 @@ case "$MODE" in
       exit 0
     fi
     echo "==> Broadcasting Deploy.s.sol against $RPC"
+    # Galileo enforces a minimum priority fee of 2 gwei; legacy gas-price
+    # path with 3 gwei is the simplest way to clear that floor.
     FOUNDRY_DISABLE_NIGHTLY_WARNING=1 forge script script/Deploy.s.sol:Deploy \
       --rpc-url "$RPC" \
       --broadcast \
+      --legacy \
+      --with-gas-price 3000000000 \
       --private-key "$DEPLOYER_PRIVATE_KEY" \
       | tee /tmp/2in-deploy.log
 
