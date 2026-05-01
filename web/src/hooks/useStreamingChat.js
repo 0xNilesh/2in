@@ -85,11 +85,12 @@ function detectPattern(text) {
   }
   // Director didn't name a pattern but used a dispatch verb — let the
   // server's LLM router decide. Common phrasings:
-  //   "Dispatching Writer..."  / "I'll dispatch..."
-  //   "Routing through..."     / "Spawning a task..."
-  //   "Kicking off..."         / "Handing this to..."
-  //   "I'll have Researcher and Editor..."
-  const dispatchVerbs = /\b(dispatch(ing|ed)?|i'?ll (route|spawn|run|kick off|hand|have)|spawn(ing)?|routing through|kicking off|handing this to)\b/i;
+  //   "Dispatching Writer..."        / "I'll dispatch..."
+  //   "Routing content request..."   / "Routing through..."
+  //   "Spawning a task..."           / "Kicking off..."
+  //   "Handing this to..."           / "I'll have Researcher and Editor..."
+  //   "Sending Researcher and Editor to..."
+  const dispatchVerbs = /\b(dispatch(ing|ed)?|i'?ll (route|spawn|run|kick off|hand|have|send)|spawn(ing)?|routing|kicking off|handing (this|it) to|sending (writer|researcher|editor|strategist|companion|voice|visual|negotiator))\b/i;
   if (dispatchVerbs.test(text)) return '__auto__';
   return null;
 }
