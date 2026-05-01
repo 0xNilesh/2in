@@ -14,8 +14,31 @@
 import { config } from '../config.js';
 import { getBroker, isBrokerConfigured } from './broker.js';
 
+import { resolveProviderUrl } from './provider-lookup.js';
+
 function hasRouter(): boolean {
   return Boolean(config.ZG_ROUTER_API_KEY);
+}
+
+function isAdvanced(): boolean {
+  return Boolean(config.ZG_PROVIDER_URL || config.ZG_PROVIDER_ADDRESS);
+}
+
+// Returns the FULL URL to POST to (router endpoint OR provider proxy path).
+// Cached; in-memory.
+let cachedAdvancedUrl: string | null = null;
+async function inferenceUrl(): Promise<string> {
+  if (config.ZG_PROVIDER_URL) {
+    return `${config.ZG_PROVIDER_URL.replace(/\/$/, '')}/v1/proxy/chat/completions`;
+  }
+  if (config.ZG_PROVIDER_ADDRESS) {
+    if (!cachedAdvancedUrl) {
+      const base = await resolveProviderUrl(config.ZG_PROVIDER_ADDRESS);
+      cachedAdvancedUrl = `${base}/v1/proxy/chat/completions`;
+    }
+    return cachedAdvancedUrl;
+  }
+  return config.ZG_ROUTER_URL;
 }
 
 export type ChatRole = 'system' | 'user' | 'assistant';
@@ -39,9 +62,10 @@ export interface ChatStreamFinal {
 export type ChatStreamYield = ChatStreamChunk | ChatStreamFinal;
 
 export interface ComputeMode {
-  kind: 'router' | 'broker' | 'mock';
+  kind: 'router' | 'advanced' | 'broker' | 'mock';
   reason?: string;
   model?: string;
+  endpoint?: string;
 }
 
 export class ComputeService {
@@ -50,10 +74,14 @@ export class ComputeService {
 
   get mode(): ComputeMode {
     if (hasRouter() && !this.routerError) {
-      return { kind: 'router', model: config.DIRECTOR_MODEL };
+      return {
+        kind: isAdvanced() ? 'advanced' : 'router',
+        model: config.DIRECTOR_MODEL,
+        endpoint: config.ZG_PROVIDER_URL ?? config.ZG_PROVIDER_ADDRESS ?? config.ZG_ROUTER_URL,
+      };
     }
     if (this.routerError) {
-      return { kind: 'mock', reason: `router unavailable: ${this.routerError}` };
+      return { kind: 'mock', reason: `${isAdvanced() ? 'advanced' : 'router'} unavailable: ${this.routerError}` };
     }
     if (!isBrokerConfigured()) {
       return { kind: 'mock', reason: 'no ZG_ROUTER_API_KEY and no BROKER_PRIVATE_KEY set' };
@@ -90,14 +118,14 @@ export class ComputeService {
       yield* mockChatStream(messages, opts);
       return;
     }
-    if (m.kind === 'router') {
+    if (m.kind === 'router' || m.kind === 'advanced') {
       try {
         yield* this.routerChatStream(messages, opts);
         return;
       } catch (err) {
         this.routerError = (err as Error).message;
         // eslint-disable-next-line no-console
-        console.warn(`[compute] router call failed (${this.routerError}) — falling back to mock`);
+        console.warn(`[compute] ${m.kind} call failed (${this.routerError}) — falling back to mock`);
         yield* mockChatStream(messages, opts);
         return;
       }
@@ -118,7 +146,8 @@ export class ComputeService {
     messages: ChatMessage[],
     opts: ChatStreamOptions,
   ): AsyncGenerator<ChatStreamYield, void, void> {
-    const res = await fetch(config.ZG_ROUTER_URL, {
+    const url = await inferenceUrl();
+    const res = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

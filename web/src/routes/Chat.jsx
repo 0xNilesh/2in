@@ -236,9 +236,11 @@ function ChatBody({ threadId, twin, seed, onNewChat, openTask }) {
               ? 'thinking…'
               : mode?.mode === 'router'
                 ? `${twin.status} · ${mode.model ?? twin.model} · 0G router · live`
-                : mode?.mode === 'broker'
-                  ? `${twin.status} · ${mode.model ?? twin.model} · 0G broker · live`
-                  : `${twin.status} · ${mode?.model ?? twin.model} · mock${mode?.reason ? ` · ${mode.reason.slice(0, 60)}${mode.reason.length > 60 ? '…' : ''}` : ''}`}
+                : mode?.mode === 'advanced'
+                  ? `${twin.status} · ${mode.model ?? twin.model} · 0G advanced · live`
+                  : mode?.mode === 'broker'
+                    ? `${twin.status} · ${mode.model ?? twin.model} · 0G broker · live`
+                    : `${twin.status} · ${mode?.model ?? twin.model} · mock${mode?.reason ? ` · ${mode.reason.slice(0, 60)}${mode.reason.length > 60 ? '…' : ''}` : ''}`}
           </div>
         </div>
         <div className="right" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>

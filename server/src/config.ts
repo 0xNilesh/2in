@@ -18,11 +18,21 @@ const Schema = z.object({
 
   // 0G Compute (broker). If BROKER_PRIVATE_KEY is unset, compute service runs
   // in mock mode (still streams over SSE; demo works without 0G funds).
-  // 0G Router — Direct API mode. Single OpenAI-compatible endpoint with
-  // a Bearer API key (app-sk-...). Get the key at https://pc.testnet.0g.ai
-  // → API Reference → "Create API key". Preferred over broker mode for
-  // simplicity; broker still works as fallback if this is unset.
+  // 0G Compute — preferred is Router (single endpoint), but supports
+  // Advanced mode too (per-provider URL). Pick ONE pair:
+  //
+  //   Router  → ZG_ROUTER_URL + ZG_ROUTER_API_KEY
+  //   Advanced → ZG_PROVIDER_URL + ZG_ROUTER_API_KEY (key is provider-bound)
+  //
+  // When ZG_PROVIDER_URL is set, it takes precedence — endpoint becomes
+  // ${ZG_PROVIDER_URL}/v1/proxy/chat/completions per the docs at
+  // pc.testnet.0g.ai/api-reference (Advanced mode).
   ZG_ROUTER_URL: z.string().default('https://router-api-testnet.integratenetwork.work/v1/chat/completions'),
+  ZG_PROVIDER_URL: z.string().optional(),
+  // Alternative to ZG_PROVIDER_URL — paste the provider address (0x…) and
+  // the server resolves the service URL via getService() on the inference
+  // contract. One eth_call on first boot, cached after.
+  ZG_PROVIDER_ADDRESS: z.string().regex(/^0x[a-fA-F0-9]{40}$/).optional(),
   ZG_ROUTER_API_KEY: z.string().optional(),
 
   // Broker mode — wallet-signed per-call. Used only if ZG_ROUTER_API_KEY
