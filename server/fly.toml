@@ -1,0 +1,47 @@
+# Fly.io alternative deploy. Pick either this OR render.yaml — not both.
+#
+# To deploy:
+#   1. Install flyctl: https://fly.io/docs/hands-on/install-flyctl/
+#   2. cd server && fly launch --no-deploy --copy-config --name 2in-server
+#   3. Set secrets:
+#        fly secrets set TWITTER_CLIENT_ID=...
+#        fly secrets set TWITTER_CLIENT_SECRET=...
+#        fly secrets set TWITTER_REDIRECT_URI=https://<your-vercel>/onboarding
+#        fly secrets set CHAIN_CONTRACT_ADDRESS=0x...
+#        fly secrets set CORS_ORIGINS=https://<your-vercel-domain>
+#        # optional:
+#        fly secrets set BROKER_PRIVATE_KEY=0x...
+#        fly secrets set STORAGE_PRIVATE_KEY=0x...
+#   4. fly deploy
+
+app = "2in-server"
+primary_region = "iad"
+kill_signal = "SIGTERM"
+kill_timeout = "10s"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  HOST     = "0.0.0.0"
+  LOG_LEVEL = "info"
+
+[http_service]
+  internal_port = 3001
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    timeout = "5s"
+    path = "/api/health"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512

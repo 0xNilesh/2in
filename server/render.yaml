@@ -1,0 +1,47 @@
+# Render blueprint for @2in/server.
+#
+# To deploy:
+#   1. Push this repo to GitHub.
+#   2. https://dashboard.render.com → New + → Blueprint → connect repo.
+#   3. Render reads this file, provisions the service.
+#   4. Set the env vars (marked sync: false) in the Render dashboard.
+#   5. Deploy.
+
+services:
+  - type: web
+    name: 2in-server
+    runtime: docker
+    region: oregon            # change as needed
+    plan: starter             # ~$7/mo; can drop to free tier for testing
+    rootDir: server
+    dockerfilePath: Dockerfile
+    healthCheckPath: /api/health
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      - key: HOST
+        value: "0.0.0.0"
+
+      - key: LOG_LEVEL
+        value: info
+
+      # --- secrets / per-deploy values (set in dashboard, not committed) ---
+      - key: TWITTER_CLIENT_ID
+        sync: false
+      - key: TWITTER_CLIENT_SECRET
+        sync: false
+      - key: TWITTER_REDIRECT_URI
+        sync: false                  # update to https://<your-vercel>/onboarding
+
+      - key: BROKER_PRIVATE_KEY
+        sync: false                  # optional — leave blank for mock
+      - key: STORAGE_PRIVATE_KEY
+        sync: false                  # optional — leave blank for mock
+
+      - key: CHAIN_CONTRACT_ADDRESS
+        sync: false                  # paste after `forge script ... --broadcast`
+
+      - key: CORS_ORIGINS
+        sync: false                  # set to https://<your-vercel-domain>
