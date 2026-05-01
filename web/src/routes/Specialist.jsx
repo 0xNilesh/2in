@@ -13,13 +13,16 @@ import { gatewayUrl } from '../lib/format.js';
 import { useTwinNft } from '../hooks/useTwinNft.js';
 import { useSpecialistJobs } from '../hooks/useSpecialistJobs.js';
 import { useFineTuneJob } from '../hooks/useFineTuneJob.js';
+import { useSnapshotHistory } from '../hooks/useSnapshotHistory.js';
 import { finetuneApi } from '../lib/api.js';
 
-const snapshotHistory = [
-  { idx: 12, when: '14m ago', from: '0x88b1…0042', to: '0x88c0…d013', delta: 'rejection_memory +3 entries' },
-  { idx: 11, when: '2d ago', from: '0x4a02…ffaa', to: '0x88b1…0042', delta: 'preference_memory override' },
-  { idx: 10, when: '6d ago', from: '0x2cc0…1199', to: '0x4a02…ffaa', delta: 'voice_memory +24 examples' },
-];
+function relativeTime(ts) {
+  const d = Date.now() - ts;
+  if (d < 60_000) return `${Math.round(d / 1000)}s ago`;
+  if (d < 3_600_000) return `${Math.round(d / 60_000)}m ago`;
+  if (d < 86_400_000) return `${Math.round(d / 3_600_000)}h ago`;
+  return `${Math.round(d / 86_400_000)}d ago`;
+}
 
 function readTwitterCorpus() {
   try {
@@ -211,6 +214,7 @@ export default function Specialist() {
   const { id } = useParams();
   const s = getSpecialist(id);
   const { state: chain, loading, error } = useTwinNft(s?.tokenId);
+  const { snapshots } = useSnapshotHistory(s?.tokenId);
 
   if (!s) {
     return (
@@ -337,15 +341,20 @@ export default function Specialist() {
                 <span>to</span>
                 <span>delta</span>
               </div>
-              {snapshotHistory.map((sn) => (
+              {snapshots.map((sn) => (
                 <div key={sn.idx} className="table-row" style={{ '--cols': '60px 110px 1fr 1fr 1.4fr' }}>
                   <span style={{ fontFamily: 'Geist Mono, monospace', color: 'var(--text-mute)' }}>#{sn.idx}</span>
-                  <span style={{ fontFamily: 'Geist Mono, monospace', fontSize: 11.5, color: 'var(--text-faint)' }}>{sn.when}</span>
-                  <span style={{ fontFamily: 'Geist Mono, monospace', fontSize: 11.5, color: 'var(--text-2)' }}>{sn.from}</span>
-                  <span style={{ fontFamily: 'Geist Mono, monospace', fontSize: 11.5, color: 'var(--peach)' }}>{sn.to}</span>
-                  <span style={{ fontSize: 12, color: 'var(--text-2)' }}>{sn.delta}</span>
+                  <span style={{ fontFamily: 'Geist Mono, monospace', fontSize: 11.5, color: 'var(--text-faint)' }}>{relativeTime(sn.ts)}</span>
+                  <span style={{ fontFamily: 'Geist Mono, monospace', fontSize: 11.5, color: 'var(--text-2)' }}>{sn.fromHash}</span>
+                  <span style={{ fontFamily: 'Geist Mono, monospace', fontSize: 11.5, color: 'var(--peach)' }}>{sn.toHash}</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-2)' }}>{sn.delta} · <span style={{ color: 'var(--text-faint)' }}>{sn.triggeredBy}</span></span>
                 </div>
               ))}
+              {snapshots.length === 0 ? (
+                <div className="table-row" style={{ '--cols': '1fr', color: 'var(--text-faint)', fontSize: 12 }}>
+                  No snapshots yet for this specialist.
+                </div>
+              ) : null}
             </div>
           </section>
         </div>
