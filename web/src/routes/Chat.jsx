@@ -16,8 +16,9 @@ import { getThread, defaultDirectorThreadId, threads as seedThreads } from '../d
 import { useTwin } from '../hooks/useTwin.js';
 import { useStreamingChat } from '../hooks/useStreamingChat.js';
 import { ROUTES } from '../lib/routes.js';
-import { taskApi, finetuneApi } from '../lib/api.js';
+import { taskApi, finetuneApi, memoryApi } from '../lib/api.js';
 import { specialists as rosterSpecialists } from '../data/specialists.js';
+import { pushToast } from '../hooks/useToasts.js';
 
 const EXT_KEY = '2in:thread-ext';
 
@@ -180,6 +181,21 @@ function ChatBody({ threadId, twin, seed, onNewChat, openTask }) {
     }
   };
 
+  const savePreference = async (text) => {
+    try {
+      const res = await memoryApi.write('preference', text, '42', 'chat correction');
+      pushToast({
+        kind: 'success',
+        title: 'Saved to preference_memory',
+        body: res.snapshot
+          ? `Snapshot fired · updateMetadata(#${res.snapshot.tokenId}) · ${res.snapshot.delta}`
+          : `${res.pendingWrites}/3 writes until next snapshot`,
+      });
+    } catch (err) {
+      pushToast({ kind: 'error', title: 'Save failed', body: err.message ?? 'try again' });
+    }
+  };
+
   const handleSend = (text) => {
     setExtension((ext) => [
       ...ext,
@@ -261,7 +277,9 @@ function ChatBody({ threadId, twin, seed, onNewChat, openTask }) {
               </div>
             </div>
           ) : null}
-          {allMessages.map((m, i) => <Message key={i} msg={m} />)}
+          {allMessages.map((m, i) => (
+            <Message key={i} msg={m} onSavePreference={m.kind === 'user' ? savePreference : undefined} />
+          ))}
           {isStreaming && partial ? (
             <Message
               msg={{

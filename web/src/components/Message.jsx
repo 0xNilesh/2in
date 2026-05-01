@@ -82,12 +82,35 @@ function PatternCard({ pattern }) {
   );
 }
 
-export function Message({ msg }) {
+export function Message({ msg, onSavePreference }) {
   if (msg.kind === 'user') {
+    const text = Array.isArray(msg.text)
+      ? msg.text.map((p) => (typeof p === 'string' ? p : p.strong ?? '')).join('')
+      : String(msg.text ?? '');
     return (
       <div className="user-row">
         <div className="user-bubble">{renderInline(Array.isArray(msg.text) ? msg.text : [msg.text])}</div>
-        <div className="meta">{msg.ts}</div>
+        <div className="meta" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <span>{msg.ts}</span>
+          {onSavePreference ? (
+            <button
+              type="button"
+              onClick={() => onSavePreference(text)}
+              style={{
+                background: 'transparent',
+                border: '1px solid var(--border)',
+                color: 'var(--text-faint)',
+                padding: '2px 8px',
+                borderRadius: 999,
+                fontSize: 10.5,
+                fontFamily: 'Geist Mono, monospace',
+                cursor: 'pointer',
+              }}
+            >
+              + save as preference
+            </button>
+          ) : null}
+        </div>
       </div>
     );
   }
