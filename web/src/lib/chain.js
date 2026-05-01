@@ -15,12 +15,13 @@
 
 import { keccak256, stringToBytes } from 'viem';
 import { TWIN_INFT_ABI } from './abi/twin-nft.js';
+import { galileo } from './chain-spec.js';
 
 export const chainConfig = {
   contractAddress: import.meta.env.VITE_CHAIN_CONTRACT_ADDRESS ?? '',
-  rpc: import.meta.env.VITE_CHAIN_RPC ?? 'https://evmrpc-testnet.0g.ai',
-  chainId: Number(import.meta.env.VITE_CHAIN_ID ?? 16602),
-  explorer: import.meta.env.VITE_CHAIN_EXPLORER ?? 'https://chainscan-galileo.0g.ai',
+  rpc: galileo.rpcUrls.default.http[0],
+  chainId: galileo.id,
+  explorer: galileo.blockExplorers.default.url,
 };
 
 export function isChainConfigured() {
@@ -35,13 +36,6 @@ export function getExplorerTokenUrl(tokenId) {
 export function getExplorerTxUrl(txHash) {
   return `${chainConfig.explorer}/tx/${txHash}`;
 }
-
-const galileo = {
-  id: chainConfig.chainId,
-  name: 'galileo',
-  nativeCurrency: { name: '0G', symbol: '0G', decimals: 18 },
-  rpcUrls: { default: { http: [chainConfig.rpc] } },
-};
 
 let _publicClientPromise = null;
 async function getPublicClient() {
