@@ -143,6 +143,51 @@ export class ComputeService {
     }
   }
 
+  /** Non-streaming OpenAI-compatible chat completion via the SAME router/
+   *  advanced endpoint chatStream uses. Accepts a generic body so callers
+   *  can pass multimodal `content` arrays (Qwen-VL) or extra params.
+   *  Returns the parsed JSON response.
+   *
+   *  Used by image.edit + analyze_image so they don't have to touch the
+   *  broker SDK (which currently reverts on Galileo for the inference
+   *  service contract). */
+  async completionRaw(body: Record<string, unknown>, opts: { timeoutMs?: number } = {}): Promise<unknown> {
+    if (!hasRouter()) {
+      throw new Error('completionRaw requires ZG_ROUTER_API_KEY (router or advanced mode)');
+    }
+    const url = await inferenceUrl();
+    const headers = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${config.ZG_ROUTER_API_KEY}`,
+    };
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 60_000);
+    let res;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ ...body, stream: false }),
+        signal: ctrl.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (res.status === 429) {
+      const ra = res.headers.get('retry-after');
+      const wait = ra ? Math.min(15_000, Math.max(1_000, Math.ceil(Number(ra) * 1000))) : 7_000;
+      // eslint-disable-next-line no-console
+      console.warn(`[compute] completionRaw 429 — backing off ${wait}ms then retrying once`);
+      await new Promise((r) => setTimeout(r, wait));
+      res = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ ...body, stream: false }) });
+    }
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`completionRaw ${res.status}: ${text.slice(0, 200)}`);
+    }
+    return res.json();
+  }
+
   async *chatStream(
     messages: ChatMessage[],
     opts: ChatStreamOptions = {},

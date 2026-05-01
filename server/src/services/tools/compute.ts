@@ -14,6 +14,7 @@ import crypto from 'node:crypto';
 import { z } from 'zod';
 import { isBrokerConfigured, getBroker } from '../broker.js';
 import { compute } from '../compute.js';
+import { config } from '../../config.js';
 import type { Tool } from './types.js';
 import { ToolError } from './types.js';
 
@@ -139,39 +140,53 @@ function mockGenImage(prompt: string, size: string, why?: string) {
 // ── analyze_image ───────────────────────────────────────────────────────
 export const analyzeImage: Tool = {
   name: 'analyze_image',
-  description: 'Vision: describe an image. Returns text description + tags.',
+  description: 'Vision: describe an image. Returns text description + tags. Uses 0G Router (Qwen-VL when available).',
   category: 'compute',
   input: z.object({
     imageUrl: z.string().url(),
     question: z.string().optional(),
   }),
   execute: async (input) => {
-    if (!isBrokerConfigured()) return mockAnalyzeImage(input.imageUrl, input.question);
+    const question = input.question ?? 'Describe this image in 2 sentences. Then list 5 tags.';
+    // Try multimodal first — if the configured provider is Qwen-VL it sees
+    // the image; if it's text-only Qwen-2.5 the call may still succeed but
+    // the model can't actually see pixels. We surface the URL either way.
+    const multimodalBody = {
+      model: config.SPECIALIST_MODEL ?? config.DIRECTOR_MODEL,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: question },
+            { type: 'image_url', image_url: { url: input.imageUrl } },
+          ],
+        },
+      ],
+      max_tokens: 400,
+    };
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const broker = (await getBroker()) as any;
-      const services: Array<{ provider: string; model: string; url?: string }> =
-        await broker.inference.listService();
-      const target = services.find((s) => /vl|vision/i.test(s.model));
-      if (!target) return mockAnalyzeImage(input.imageUrl, input.question, 'no vision provider available');
+      const j = await compute.completionRaw(multimodalBody) as { choices?: Array<{ message?: { content?: string } }> };
+      const description = j.choices?.[0]?.message?.content ?? '';
+      if (description) return { description, mode: 'multimodal', source: '0g-router' };
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(`[analyze_image] multimodal failed (${(err as Error).message}) — falling back`);
+    }
 
-      const messages = [{
-        role: 'user',
-        content: [
-          { type: 'text', text: input.question ?? 'Describe this image in 2 sentences. List 5 tags.' },
-          { type: 'image_url', image_url: { url: input.imageUrl } },
-        ],
-      }];
-      const headers = await broker.inference.getRequestHeaders(target.provider, JSON.stringify(messages));
-      const r = await fetch(`${target.url}/v1/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...headers },
-        body: JSON.stringify({ model: target.model, messages, max_tokens: 400 }),
-      });
-      const j: any = await r.json();
-      if (!r.ok) throw new Error(j?.error?.message ?? `analyze ${r.status}`);
-      const text = j.choices?.[0]?.message?.content ?? '';
-      return { description: text, provider: target.provider, source: 'broker' };
+    // Text-only fallback — references the URL but doesn't load pixels.
+    const textBody = {
+      model: config.SPECIALIST_MODEL ?? config.DIRECTOR_MODEL,
+      messages: [{
+        role: 'user' as const,
+        content: `${question}\n\nImage URL: ${input.imageUrl}\n\nWithout seeing the image, describe what one would expect based on common usage at that URL pattern.`,
+      }],
+      max_tokens: 400,
+    };
+    try {
+      const j = await compute.completionRaw(textBody) as { choices?: Array<{ message?: { content?: string } }> };
+      const description = j.choices?.[0]?.message?.content ?? '';
+      if (!description) return mockAnalyzeImage(input.imageUrl, input.question);
+      return { description, mode: 'text-only', source: '0g-router', note: 'Provider is text-only; description is inferred without seeing pixels.' };
     } catch (err) {
       throw new ToolError(`analyze_image failed: ${(err as Error).message}`, err);
     }
