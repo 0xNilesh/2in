@@ -8,12 +8,16 @@
 import { useCallback, useState } from 'react';
 import { mintMaster, cloneSpecialist, isChainConfigured } from '../lib/chain.js';
 
+// Mints master + the core-5. Optional 3 (voice / visual / negotiator) are
+// surfaced as opt-in checkboxes elsewhere in onboarding and minted only on
+// confirmation; they're not part of the always-on sequence.
 const ROSTER = [
-  { id: 'master',  who: 'master',  trainedOn: 'identity',                  isMaster: true  },
-  { id: 'quill',   who: 'Quill',   trainedOn: 'tweets',                    isMaster: false },
-  { id: 'cadence', who: 'Cadence', trainedOn: 'podcast / video transcripts', isMaster: false },
-  { id: 'mantle',  who: 'Mantle',  trainedOn: 'contracts',                 isMaster: false },
-  { id: 'mark',    who: 'Mark',    trainedOn: 'rejection_memory',          isMaster: false },
+  { id: 'master',     who: 'master',     trainedOn: 'identity',                            isMaster: true  },
+  { id: 'writer',     who: 'Writer',     trainedOn: 'tweets · captions · essays · DMs',    isMaster: false },
+  { id: 'researcher', who: 'Researcher', trainedOn: 'archive · audience · performance',    isMaster: false },
+  { id: 'editor',     who: 'Editor',     trainedOn: 'rejection_memory · style guide',      isMaster: false },
+  { id: 'strategist', who: 'Strategist', trainedOn: 'performance · calendar · goals',      isMaster: false },
+  { id: 'companion',  who: 'Companion',  trainedOn: 'relationships · journal · context',   isMaster: false },
 ];
 
 const initialRows = (twinName) =>

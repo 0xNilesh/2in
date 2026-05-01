@@ -180,11 +180,11 @@ function Connect({ auth }) {
 }
 
 const PLATFORMS = [
-  { id: 'x',  name: 'X (Twitter)',  iconClass: 'x',  sub: 'tweets feed Quill',                 enabled: true  },
-  { id: 'ig', name: 'Instagram',    iconClass: 'ig', sub: 'captions feed Quill',               enabled: false },
-  { id: 'tt', name: 'TikTok',       iconClass: 'tt', sub: 'video transcripts feed Cadence',    enabled: false },
-  { id: 'yt', name: 'YouTube',      iconClass: 'yt', sub: 'transcripts feed Cadence',          enabled: false },
-  { id: 'li', name: 'LinkedIn',     iconClass: 'li', sub: 'long-form feeds Quill',             enabled: false },
+  { id: 'x',  name: 'X (Twitter)',  iconClass: 'x',  sub: 'tweets feed the Writer',          enabled: true  },
+  { id: 'ig', name: 'Instagram',    iconClass: 'ig', sub: 'captions feed the Writer',        enabled: false },
+  { id: 'tt', name: 'TikTok',       iconClass: 'tt', sub: 'video transcripts feed the Voice', enabled: false },
+  { id: 'yt', name: 'YouTube',      iconClass: 'yt', sub: 'transcripts feed the Voice',      enabled: false },
+  { id: 'li', name: 'LinkedIn',     iconClass: 'li', sub: 'long-form feeds the Writer',      enabled: false },
 ];
 
 function Ingest({ state, update }) {
@@ -218,7 +218,7 @@ function Ingest({ state, update }) {
                     <div className="social-name">{isConnected ? `@${t.handle}` : p.name}</div>
                     <div className="social-sub">
                       {isConnected
-                        ? `${t.tweets?.length ?? 0} tweets pulled · trains Quill`
+                        ? `${t.tweets?.length ?? 0} tweets pulled · trains Writer`
                         : p.sub}
                     </div>
                   </div>
@@ -772,8 +772,10 @@ function Mint({ twinName, twitter, walletAddress }) {
       <div className="onboard-eyebrow">step 4 of 5</div>
       <h2 className="onboard-title">Minting your team.</h2>
       <p className="onboard-sub">
-        One master twin + four specialists, each their own iNFT under your
-        wallet on 0G. Encrypted intelligence lives on 0G Storage.
+        One master twin + five core specialists (Writer, Researcher, Editor,
+        Strategist, Companion), each their own iNFT under your wallet on 0G.
+        Voice / Visual / Negotiator are opt-in later. Encrypted intelligence
+        lives on 0G Storage.
       </p>
 
       <div className="mint-reveal">

@@ -144,34 +144,34 @@ export default function Landing() {
 
         <div className="feature-grid">
           <div className="feature">
-            <div className="feature-icon">Q</div>
-            <div className="feature-title">Quill · Writer</div>
-            <div className="feature-text">Your tweets, captions, essays. Drafts in your voice — terse where you're terse, rhythmic where you're rhythmic.</div>
+            <div className="feature-icon">W</div>
+            <div className="feature-title">Writer</div>
+            <div className="feature-text">Drafts everything in your voice — posts, replies, captions, emails. Most-used specialist.</div>
           </div>
           <div className="feature">
-            <div className="feature-icon">C</div>
-            <div className="feature-title">Cadence · Voice</div>
-            <div className="feature-text">Your podcast and video transcripts. Drafts spoken-style content with your pace and pauses.</div>
+            <div className="feature-icon">R</div>
+            <div className="feature-title">Researcher</div>
+            <div className="feature-text">Pulls facts, performance signals, audience overlap. Called by every other specialist for context.</div>
           </div>
           <div className="feature">
-            <div className="feature-icon">M</div>
-            <div className="feature-title">Mantle · Legal</div>
-            <div className="feature-text">Your contracts and brand guidelines. Reviews drafts pre-publish, flags risk before it ships.</div>
-          </div>
-          <div className="feature">
-            <div className="feature-icon">M</div>
-            <div className="feature-title">Mark · Editor</div>
-            <div className="feature-text">Your rejection history — what you killed and why. The final critique pass before anything goes out.</div>
+            <div className="feature-icon">E</div>
+            <div className="feature-title">Editor</div>
+            <div className="feature-text">Final pass. Gates against what you killed before; checks tone + brand consistency.</div>
           </div>
           <div className="feature">
             <div className="feature-icon">S</div>
-            <div className="feature-title">Scout · Researcher</div>
-            <div className="feature-text">Your archive + audience analytics. Surfaces what worked, what to revisit, what's drifting.</div>
+            <div className="feature-title">Strategist</div>
+            <div className="feature-text">"Should I post this now?" · weekly themes · content cadence · goal tracking.</div>
+          </div>
+          <div className="feature">
+            <div className="feature-icon">C</div>
+            <div className="feature-title">Companion</div>
+            <div className="feature-text">Personal memory keeper. "Remember this", "who is this person", reflections.</div>
           </div>
           <div className="feature">
             <div className="feature-icon">+</div>
-            <div className="feature-title">Train your own</div>
-            <div className="feature-text">Drop in any corpus, pick a role, mint a new specialist. They join your team instantly.</div>
+            <div className="feature-title">Optional add-ons</div>
+            <div className="feature-text">Voice (podcast/video script), Visual (image gen + analysis), Negotiator (sponsor replies). Opt in based on what you actually do.</div>
           </div>
         </div>
       </section>
@@ -198,7 +198,7 @@ export default function Landing() {
           <div className="feature">
             <div className="feature-icon">⊘</div>
             <div className="feature-title">Rejection memory</div>
-            <div className="feature-text">What you killed and why. Mark gates every draft against it.</div>
+            <div className="feature-text">What you killed and why. Editor gates every draft against it.</div>
           </div>
         </div>
       </section>

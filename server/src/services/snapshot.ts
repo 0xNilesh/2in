@@ -46,15 +46,18 @@ export type SnapshotEvent =
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 const THRESHOLD = 3;
 
-// specialistId → tokenId mapping. Seeded with the demo roster from
+// specialistId → tokenId mapping. Seeded with the role-only roster from
 // web/src/data/specialists.js — keep in sync.
 const TOKEN_OF: Record<string, number> = {
   director: 42,
-  quill: 43,
-  cadence: 44,
-  mantle: 45,
-  mark: 46,
-  scout: 47,
+  writer: 43,
+  researcher: 44,
+  editor: 45,
+  strategist: 46,
+  companion: 47,
+  voice: 48,
+  visual: 49,
+  negotiator: 50,
 };
 
 const writeCounters = new Map<string, WriteRecord[]>(); // specialistId → recent writes

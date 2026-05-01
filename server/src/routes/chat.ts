@@ -34,7 +34,7 @@ const ChatBody = z.object({
   model: z.string().optional(),
 });
 
-const SPECIALISTS: AgentRole[] = ['quill', 'cadence', 'mantle', 'mark', 'scout'];
+const SPECIALISTS: AgentRole[] = ['writer', 'researcher', 'editor', 'strategist', 'companion', 'voice', 'visual', 'negotiator'];
 
 export async function chatRoutes(app: FastifyInstance): Promise<void> {
   app.get('/chat/mode', async () => ({

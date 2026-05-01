@@ -14,7 +14,7 @@ export const tasks = {
     steps: [
       {
         idx: 1,
-        agent: 'scout',
+        agent: 'researcher',
         label: 'Research the brand',
         status: 'done',
         elapsed: '4.1s',
@@ -27,7 +27,7 @@ export const tasks = {
       },
       {
         idx: 2,
-        agent: 'quill',
+        agent: 'writer',
         label: 'Draft v1 in your voice',
         status: 'done',
         elapsed: '6.8s',
@@ -40,7 +40,7 @@ export const tasks = {
       },
       {
         idx: 3,
-        agent: 'mantle',
+        agent: 'editor',
         label: 'Legal review',
         status: 'live',
         elapsed: '8.2s',
@@ -53,13 +53,13 @@ export const tasks = {
       },
       {
         idx: 4,
-        agent: 'quill',
+        agent: 'writer',
         label: 'Revise on Mantle\'s notes',
         status: 'pending',
       },
       {
         idx: 5,
-        agent: 'mark',
+        agent: 'editor',
         label: 'Final pass · gate against rejection_memory',
         status: 'pending',
       },
@@ -77,7 +77,7 @@ export const tasks = {
     steps: [
       {
         idx: 1,
-        agent: 'scout',
+        agent: 'researcher',
         label: 'Pull recent themes',
         status: 'done',
         elapsed: '2.4s',
@@ -86,7 +86,7 @@ export const tasks = {
       },
       {
         idx: 2,
-        agent: 'quill',
+        agent: 'writer',
         label: 'Draft 5 hooks',
         status: 'done',
         elapsed: '5.1s',
@@ -96,7 +96,7 @@ export const tasks = {
       },
       {
         idx: 3,
-        agent: 'mark',
+        agent: 'editor',
         label: 'Final pass',
         status: 'done',
         elapsed: '2.0s',
@@ -117,7 +117,7 @@ export const tasks = {
     steps: [
       {
         idx: 1,
-        agent: 'scout',
+        agent: 'researcher',
         label: 'Pull cadence references',
         status: 'done',
         elapsed: '3.2s',
@@ -126,7 +126,7 @@ export const tasks = {
       },
       {
         idx: 2,
-        agent: 'cadence',
+        agent: 'voice',
         label: 'Write cold open in your spoken cadence',
         status: 'done',
         elapsed: '7.4s',
@@ -136,7 +136,7 @@ export const tasks = {
       },
       {
         idx: 3,
-        agent: 'mark',
+        agent: 'editor',
         label: 'Final pass',
         status: 'done',
         elapsed: '1.8s',

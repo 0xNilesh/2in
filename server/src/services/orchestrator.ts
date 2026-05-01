@@ -1,11 +1,12 @@
-// Pattern orchestrator. Reads a pattern definition (Scout → Quill → Mantle
+// Pattern orchestrator. Reads a pattern definition (Researcher → Writer → Editor
 // → ...), invokes each step's agent via the compute service, runs each
 // declared tool through the registry, streams everything to the bus, and
 // chains step outputs as context for the next step.
 //
-// Pattern shape:
-//   { id, title, steps: [{ idx, agent, label, tools? }] }
-//   tools = [{ name, args: object }]   args validated by the tool's zod schema
+// Pattern selection is LLM-driven: routePattern() calls Qwen with the user's
+// goal + the pattern catalog, parses a JSON {pattern, reason} response.
+// Falls back to keyword regex if the LLM output can't be parsed (network or
+// rate-limit failure).
 
 import { compute, type ChatMessage } from './compute.js';
 import { systemPrompt, type AgentRole, type PromptContext } from './prompts.js';
@@ -23,93 +24,218 @@ export interface PatternStep {
 export interface Pattern {
   id: string;
   title: string;
+  description: string;
   steps: PatternStep[];
 }
 
 export const PATTERNS: Record<string, Pattern> = {
-  'content-draft': {
-    id: 'content-draft',
-    title: 'content-draft',
+  'daily-post': {
+    id: 'daily-post',
+    title: 'daily-post',
+    description: 'Quick draft → editor gate. For everyday posts, replies, captions.',
     steps: [
       {
-        idx: 1, agent: 'scout', label: 'Pull recent themes',
-        tools: [{ name: 'search_memory', args: { slice: 'performance', query: 'recent' } }],
+        idx: 1, agent: 'writer', label: 'Draft in your voice',
+        tools: [{ name: 'read_memory', args: { slice: 'voice', limit: 10 } }],
       },
       {
-        idx: 2, agent: 'quill', label: 'Draft in your voice',
-        tools: [{ name: 'read_memory', args: { slice: 'voice', limit: 15 } }],
-      },
-      {
-        idx: 3, agent: 'mark', label: 'Final pass',
+        idx: 2, agent: 'editor', label: 'Final pass',
         tools: [{ name: 'search_memory', args: { slice: 'rejection', query: 'pattern' } }],
       },
     ],
   },
-  'with-legal-review': {
-    id: 'with-legal-review',
-    title: 'with-legal-review',
+  'with-research': {
+    id: 'with-research',
+    title: 'with-research',
+    description: 'Researcher pulls facts → Writer drafts → Editor gates. For posts about specific topics, people, events.',
     steps: [
       {
-        idx: 1, agent: 'scout', label: 'Research the brand',
-        tools: [{ name: 'search_memory', args: { slice: 'relationship', query: 'brand' } }],
+        idx: 1, agent: 'researcher', label: 'Pull facts + audience overlap',
+        tools: [{ name: 'search_memory', args: { slice: 'relationship', query: 'topic' } }],
       },
       {
-        idx: 2, agent: 'quill', label: 'Draft v1',
-        tools: [{ name: 'read_memory', args: { slice: 'voice', limit: 15 } }],
+        idx: 2, agent: 'writer', label: 'Draft in your voice',
+        tools: [{ name: 'read_memory', args: { slice: 'voice', limit: 10 } }],
       },
       {
-        idx: 3, agent: 'mantle', label: 'Legal review',
-        tools: [{ name: 'read_memory', args: { slice: 'preference' } }],
-      },
-      { idx: 4, agent: 'quill', label: 'Revise on Mantle\'s notes' },
-      {
-        idx: 5, agent: 'mark', label: 'Final pass',
+        idx: 3, agent: 'editor', label: 'Final pass',
         tools: [{ name: 'search_memory', args: { slice: 'rejection', query: 'pattern' } }],
       },
+    ],
+  },
+  'weekly-plan': {
+    id: 'weekly-plan',
+    title: 'weekly-plan',
+    description: 'Researcher pulls performance → Strategist plans themes → Companion logs the plan.',
+    steps: [
+      {
+        idx: 1, agent: 'researcher', label: 'Pull last week performance',
+        tools: [{ name: 'read_memory', args: { slice: 'performance', limit: 30 } }],
+      },
+      {
+        idx: 2, agent: 'strategist', label: 'Pick this week themes + cadence',
+        tools: [{ name: 'read_memory', args: { slice: 'preference', limit: 10 } }],
+      },
+      {
+        idx: 3, agent: 'companion', label: 'Log plan to relationship_memory',
+        tools: [{ name: 'write_memory', args: { slice: 'relationship', value: 'weekly plan' } }],
+      },
+    ],
+  },
+  'dm-reply': {
+    id: 'dm-reply',
+    title: 'dm-reply',
+    description: 'Companion pulls who-this-is context → Writer drafts the reply → Editor checks tone.',
+    steps: [
+      {
+        idx: 1, agent: 'companion', label: 'Pull context for this contact',
+        tools: [{ name: 'search_memory', args: { slice: 'relationship', query: 'sender' } }],
+      },
+      {
+        idx: 2, agent: 'writer', label: 'Draft reply',
+        tools: [{ name: 'read_memory', args: { slice: 'voice', limit: 8 } }],
+      },
+      {
+        idx: 3, agent: 'editor', label: 'Tone check',
+        tools: [{ name: 'search_memory', args: { slice: 'rejection', query: 'tone' } }],
+      },
+    ],
+  },
+  'audit-week': {
+    id: 'audit-week',
+    title: 'audit-week',
+    description: 'Researcher pulls perf → Strategist scores the week → Companion writes the reflection.',
+    steps: [
+      {
+        idx: 1, agent: 'researcher', label: 'Aggregate week metrics',
+        tools: [{ name: 'read_memory', args: { slice: 'performance', limit: 50 } }],
+      },
+      {
+        idx: 2, agent: 'strategist', label: 'Score what worked / what drifted',
+        tools: [{ name: 'read_memory', args: { slice: 'preference', limit: 10 } }],
+      },
+      {
+        idx: 3, agent: 'companion', label: 'Reflection to journal',
+        tools: [{ name: 'write_memory', args: { slice: 'relationship', value: 'weekly reflection' } }],
+      },
+    ],
+  },
+  'visual-post': {
+    id: 'visual-post',
+    title: 'visual-post',
+    description: 'Visual generates image → Writer writes caption → Editor gates.',
+    steps: [
+      {
+        idx: 1, agent: 'visual', label: 'Generate image prompt',
+        tools: [{ name: 'gen_image', args: { prompt: 'placeholder', size: '1024x1024' } }],
+      },
+      {
+        idx: 2, agent: 'writer', label: 'Caption in your voice',
+        tools: [{ name: 'read_memory', args: { slice: 'voice', limit: 10 } }],
+      },
+      {
+        idx: 3, agent: 'editor', label: 'Gate' },
+    ],
+  },
+  'sponsor-reply': {
+    id: 'sponsor-reply',
+    title: 'sponsor-reply',
+    description: 'Negotiator drafts deal-term reply → Editor reviews tone.',
+    steps: [
+      {
+        idx: 1, agent: 'researcher', label: 'Pull prior deals with this brand',
+        tools: [{ name: 'search_memory', args: { slice: 'relationship', query: 'sponsor' } }],
+      },
+      {
+        idx: 2, agent: 'negotiator', label: 'Draft reply' },
+      { idx: 3, agent: 'editor', label: 'Final pass' },
     ],
   },
   'clip-shorts': {
     id: 'clip-shorts',
     title: 'clip-shorts',
+    description: 'Voice transcribes podcast → Researcher picks clips → Visual generates covers → Writer writes captions.',
     steps: [
       {
-        idx: 1, agent: 'scout', label: 'Locate source episode',
-        tools: [{ name: 'read_memory', args: { slice: 'relationship', limit: 5 } }],
-      },
-      {
-        idx: 2, agent: 'cadence', label: 'Transcribe audio',
+        idx: 1, agent: 'voice', label: 'Transcribe source audio',
         tools: [{ name: 'transcribe', args: { audioUrl: 'https://example.com/podcast/ep48.mp3' } }],
       },
       {
-        idx: 3, agent: 'cadence', label: 'Pick high-leverage clips',
+        idx: 2, agent: 'researcher', label: 'Pick high-leverage clips',
         tools: [{
           name: 'find_clips',
-          args: {
-            transcript: 'I want to talk about something I\'ve been getting wrong for a year. I thought I was burned out — turns out, I was bored. Here\'s what changed.',
-            n: 3,
-          },
+          args: { transcript: 'placeholder', n: 3 },
         }],
       },
       {
-        idx: 4, agent: 'mark', label: 'Stage shorts for review',
-        tools: [
-          { name: 'store', args: { content: 'clip-1.mp4 placeholder', contentType: 'text' } },
-          { name: 'draft_post', args: { platform: 'x', content: 'Three minutes of footage. New short ↓' } },
-        ],
+        idx: 3, agent: 'writer', label: 'Caption shorts',
+        tools: [{ name: 'read_memory', args: { slice: 'voice', limit: 10 } }],
       },
     ],
   },
 };
 
-export function pickPattern(userInput: string): Pattern {
+// === Pattern routing — LLM-driven with regex fallback ====================
+const ROUTER_SYSTEM = `You are a routing planner. Given a user goal and the catalog of available patterns, pick exactly one pattern that fits best. Reply with ONLY a JSON object — no prose, no markdown — in this shape:
+  {"pattern": "<pattern-id>", "reason": "<one short sentence>"}
+If no pattern is a clean fit, default to "daily-post".`;
+
+function regexFallback(userInput: string): string {
   const lower = userInput.toLowerCase();
-  if (/(sponsor|brand|acme|deal|paid|#ad|endorsement)/.test(lower)) {
-    return PATTERNS['with-legal-review']!;
+  if (/(weekly|plan|theme|cadence|schedule|roadmap)/.test(lower)) return 'weekly-plan';
+  if (/(audit|review week|recap|score|reflection)/.test(lower)) return 'audit-week';
+  if (/(dm|reply|message|email|respond)/.test(lower)) return 'dm-reply';
+  if (/(sponsor|brand|deal|paid|#ad|endorsement|negotiate)/.test(lower)) return 'sponsor-reply';
+  if (/(image|cover|picture|art|visual|reel)/.test(lower)) return 'visual-post';
+  if (/(clip|short|episode|podcast|trim|highlight|transcribe)/.test(lower)) return 'clip-shorts';
+  if (/(stani|aave|founder|who is|tell me about|news|trending|fact)/.test(lower)) return 'with-research';
+  return 'daily-post';
+}
+
+export async function routePattern(userInput: string, ctx: PromptContext): Promise<{ pattern: Pattern; source: 'llm' | 'regex' }> {
+  const catalog = Object.values(PATTERNS)
+    .map((p) => `  - ${p.id}: ${p.description}`)
+    .join('\n');
+
+  try {
+    const messages: ChatMessage[] = [
+      { role: 'system', content: ROUTER_SYSTEM + '\n\nAvailable patterns:\n' + catalog },
+      { role: 'user', content: `Goal: ${userInput}\n\nReturn JSON only.` },
+    ];
+    let buf = '';
+    for await (const chunk of compute.chatStream(messages, { temperature: 0.2 })) {
+      if ('delta' in chunk && chunk.delta) buf += chunk.delta;
+      if ('done' in chunk && chunk.done) break;
+    }
+    const parsed = extractJson(buf);
+    const id = parsed?.pattern;
+    if (id && PATTERNS[id]) {
+      return { pattern: PATTERNS[id]!, source: 'llm' };
+    }
+    // eslint-disable-next-line no-console
+    console.warn(`[router] LLM returned unknown pattern id "${id}" — falling back to regex`);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(`[router] LLM call failed (${(err as Error).message}) — falling back to regex`);
   }
-  if (/(clip|short|reel|episode|podcast|trim|highlight)/.test(lower)) {
-    return PATTERNS['clip-shorts']!;
+  const fallbackId = regexFallback(userInput);
+  return { pattern: PATTERNS[fallbackId]!, source: 'regex' };
+}
+
+function extractJson(text: string): { pattern?: string; reason?: string } | null {
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start < 0 || end <= start) return null;
+  try {
+    return JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return null;
   }
-  return PATTERNS['content-draft']!;
+}
+
+// Synchronous fallback (used when caller can't await the LLM router).
+export function pickPattern(userInput: string): Pattern {
+  return PATTERNS[regexFallback(userInput)]!;
 }
 
 export interface SpawnTaskInput {
@@ -126,26 +252,39 @@ export interface SpawnTaskResult {
 
 export function spawnTask(input: SpawnTaskInput): SpawnTaskResult {
   const taskId = `task-${crypto.randomBytes(4).toString('hex')}`;
-  const pattern =
-    (input.pattern && PATTERNS[input.pattern]) || pickPattern(input.goal);
+  // For the synchronous return we need the pattern id immediately. If the
+  // caller passed an explicit pattern id, honor it; otherwise quick regex
+  // fallback for the response payload, then re-route via LLM inside
+  // runPattern (which can swap patterns mid-flight if needed — but for
+  // simplicity we lock in the routed pattern at start).
+  const initial = (input.pattern && PATTERNS[input.pattern]) || pickPattern(input.goal);
 
   openBus(taskId);
 
-  // Run async — POST returns immediately, client streams events.
-  void runPattern({ taskId, pattern, input }).catch((err) => {
+  void runPattern({ taskId, initial, input }).catch((err) => {
     emit(taskId, { type: 'task.error', id: taskId, message: err.message ?? 'orchestrator_failed' });
   });
 
-  return { taskId, pattern: pattern.id, totalSteps: pattern.steps.length };
+  return { taskId, pattern: initial.id, totalSteps: initial.steps.length };
 }
 
 interface RunArgs {
   taskId: string;
-  pattern: Pattern;
+  initial: Pattern;
   input: SpawnTaskInput;
 }
 
-async function runPattern({ taskId, pattern, input }: RunArgs): Promise<void> {
+async function runPattern({ taskId, initial, input }: RunArgs): Promise<void> {
+  // If no explicit pattern was passed, run the LLM router to pick one.
+  // This may swap from the regex initial if the LLM disagrees.
+  let pattern = initial;
+  if (!input.pattern) {
+    const routed = await routePattern(input.goal, input.context);
+    pattern = routed.pattern;
+    // eslint-disable-next-line no-console
+    console.info(`[router] picked ${pattern.id} via ${routed.source} for goal "${input.goal.slice(0, 60)}"`);
+  }
+
   emit(taskId, {
     type: 'meta',
     task: {
@@ -159,8 +298,6 @@ async function runPattern({ taskId, pattern, input }: RunArgs): Promise<void> {
 
   const stepOutputs: Array<{ agent: AgentRole; output: string }> = [];
   const startedAt = Date.now();
-  // Memory tools are scoped per-twin. Pull twinId from context — fall back
-  // to the demo master ('42') when not provided.
   const twinId = '42';
   // 0G provider caps at 10 req/min per API key. Pacing each LLM step at
   // ~7s keeps a 5-step task under the cap with room for the user's chat
@@ -171,8 +308,6 @@ async function runPattern({ taskId, pattern, input }: RunArgs): Promise<void> {
   for (const step of pattern.steps) {
     emit(taskId, { type: 'step.start', idx: step.idx, agent: step.agent, label: step.label });
 
-    // Real tool invocation through the registry. On failure, surface the
-    // error in the bus and stop the task.
     for (const t of step.tools ?? []) {
       try {
         const out = await registry.execute(t.name, t.args, { twinId, taskId });
@@ -194,9 +329,6 @@ async function runPattern({ taskId, pattern, input }: RunArgs): Promise<void> {
       }
     }
 
-    // Pace ourselves so back-to-back steps don't trip the provider's
-    // 10 req/min cap. Wait the remainder of STEP_PACE_MS since the
-    // previous LLM call (skip on the first step — no prior call).
     if (lastLlmAt !== 0) {
       const elapsed = Date.now() - lastLlmAt;
       const wait = STEP_PACE_MS - elapsed;
@@ -257,12 +389,10 @@ function buildMessages(
   return messages;
 }
 
-// Truncate / pretty-print a tool result so the bus payload stays small.
 function summarise(value: unknown): unknown {
   if (value == null) return value;
   if (typeof value === 'string') return value.length > 240 ? value.slice(0, 240) + '…' : value;
   if (typeof value !== 'object') return value;
-  // Object — keep keys, truncate long string values.
   try {
     const json = JSON.stringify(value);
     if (json.length <= 600) return value;

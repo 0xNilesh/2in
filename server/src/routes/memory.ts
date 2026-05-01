@@ -14,15 +14,16 @@ import { recordWrite } from '../services/snapshot.js';
 import crypto from 'node:crypto';
 
 // Map slices to a default "owner" specialist for snapshot bookkeeping when
-// the route doesn't carry an explicit specialistId. voice/rejection are
-// Quill-owned by convention in our roster; preference + relationship +
-// performance are master-twin (director) writes.
+// the route doesn't carry an explicit specialistId. Updated for the
+// role-only roster: voice writes belong to Writer, rejection patterns to
+// Editor, preferences to Strategist, relationship + performance to
+// Companion + Researcher respectively.
 const DEFAULT_OWNER: Record<string, string> = {
-  voice: 'quill',
-  rejection: 'mark',
-  preference: 'director',
-  relationship: 'director',
-  performance: 'director',
+  voice: 'writer',
+  rejection: 'editor',
+  preference: 'strategist',
+  relationship: 'companion',
+  performance: 'researcher',
 };
 
 const SLICES = ['voice', 'preference', 'performance', 'rejection', 'relationship'] as const;

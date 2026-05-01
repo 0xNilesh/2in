@@ -9,7 +9,7 @@ export const activity = [
     state: 'running',
     startedAt: '14:22 · 2m ago',
     cost: '0.11 0G',
-    specialists: ['scout', 'quill', 'mantle', 'mark'],
+    specialists: ['researcher', 'writer', 'editor', 'mark'],
     archiveRoot: null,
   },
   {
@@ -19,7 +19,7 @@ export const activity = [
     state: 'approved',
     startedAt: '10:14 · 4h ago',
     cost: '0.07 0G',
-    specialists: ['quill', 'mark'],
+    specialists: ['writer', 'mark'],
     archiveRoot: '0x9c11…02bb',
   },
   {
@@ -29,7 +29,7 @@ export const activity = [
     state: 'awaiting-approval',
     startedAt: 'Yesterday · 18:02',
     cost: '0.09 0G',
-    specialists: ['cadence', 'mark'],
+    specialists: ['voice', 'mark'],
     archiveRoot: '0x441f…ba31',
   },
   {
@@ -39,7 +39,7 @@ export const activity = [
     state: 'approved',
     startedAt: 'Yesterday · 12:40',
     cost: '0.42 0G',
-    specialists: ['scout', 'runner'],
+    specialists: ['researcher', 'runner'],
     archiveRoot: '0x77c2…bb44',
   },
   {
@@ -49,7 +49,7 @@ export const activity = [
     state: 'archived',
     startedAt: '2d ago · 13:48',
     cost: '0.06 0G',
-    specialists: ['mantle'],
+    specialists: ['editor'],
     archiveRoot: '0x1bcd…331a',
   },
   {
@@ -59,7 +59,7 @@ export const activity = [
     state: 'archived',
     startedAt: '3d ago · 02:11',
     cost: '0.50 0G',
-    specialists: ['scout', 'runner'],
+    specialists: ['researcher', 'runner'],
     archiveRoot: '0x6c12…704a',
   },
   {
@@ -69,7 +69,7 @@ export const activity = [
     state: 'rejected',
     startedAt: '5d ago · 09:04',
     cost: '0.04 0G',
-    specialists: ['quill', 'mark'],
+    specialists: ['writer', 'mark'],
     archiveRoot: '0x222e…0098',
   },
   {
@@ -79,7 +79,7 @@ export const activity = [
     state: 'failed',
     startedAt: '6d ago · 05:00',
     cost: '0.01 0G',
-    specialists: ['scout'],
+    specialists: ['researcher'],
     archiveRoot: null,
   },
 ];
