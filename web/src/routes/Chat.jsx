@@ -244,6 +244,13 @@ function ChatBody({ threadId, twin, seed, onNewChat, openTask }) {
           </div>
         </div>
         <div className="right" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <button
+            className="btn btn-ghost"
+            onClick={() => setExtension([])}
+            title="Wipe local conversation history for this thread (model bias reset)"
+          >
+            Clear
+          </button>
           <button className="btn btn-ghost" onClick={onNewChat} title="Start a new chat">+ New chat</button>
           <button className="icon-btn" title="open in new">↗</button>
         </div>

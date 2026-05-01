@@ -68,16 +68,22 @@ function ctxFrom(twin: z.infer<typeof TwinCtx>) {
   };
 }
 
+// Max prior turns we keep in context (excluding system + the new user msg).
+// 7B models overfit to repeated patterns when they see >3 of the same shape;
+// trim aggressively so a stale extension can't ossify the response.
+const HISTORY_TURN_CAP = 6;
+
 function withSystem(
   role: AgentRole,
   history: ChatMessage[],
   ctx: { twinName: string; twitterHandle?: string | null; walletAddress?: string | null },
 ): ChatMessage[] {
   const sys = systemPrompt(role, ctx);
-  if (history[0]?.role === 'system') {
-    return [{ role: 'system', content: sys }, ...history.slice(1)];
-  }
-  return [{ role: 'system', content: sys }, ...history];
+  // Strip any client-supplied system message — the server controls the role.
+  const filtered = history[0]?.role === 'system' ? history.slice(1) : history;
+  // Keep only the most recent N messages to bound context size.
+  const recent = filtered.slice(-HISTORY_TURN_CAP);
+  return [{ role: 'system', content: sys }, ...recent];
 }
 
 function streamChat(
