@@ -136,16 +136,23 @@ export default function Memory() {
                 </>
               ) : null}
 
-              <div className="label-mono" style={{ margin: '24px 0 10px' }}>Recent entries · {active.entries} total</div>
-              {active.samples.map((s, i) => (
-                <div key={i} className="card" style={{ padding: '12px 16px' }}>
-                  <div style={{ display: 'flex', gap: 12, alignItems: 'baseline' }}>
-                    <span style={{ fontFamily: 'Geist Mono, monospace', fontSize: 11, color: 'var(--peach)', minWidth: 110 }}>{s.who}</span>
-                    <span style={{ flex: 1, fontSize: 13, color: 'var(--text-2)' }}>{s.text}</span>
-                    <span style={{ fontFamily: 'Geist Mono, monospace', fontSize: 10.5, color: 'var(--text-faint)' }}>{s.when}</span>
-                  </div>
+              {manual.length === 0 ? (
+                <div
+                  style={{
+                    marginTop: 24,
+                    padding: 16,
+                    background: 'var(--bg)',
+                    border: '1px dashed var(--border)',
+                    borderRadius: 10,
+                    fontSize: 12.5,
+                    color: 'var(--text-mute)',
+                    textAlign: 'center',
+                  }}
+                >
+                  No entries yet. Add one above, or send a chat correction
+                  in the conversation and click <em>save as preference</em>.
                 </div>
-              ))}
+              ) : null}
             </section>
           </div>
         </div>

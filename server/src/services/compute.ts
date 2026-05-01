@@ -40,32 +40,55 @@ export interface ComputeMode {
 }
 
 export class ComputeService {
+  // Sticky failure marker — once broker init blows up, stop retrying it
+  // every request and report mock with the actual error message.
+  private brokerError: string | null = null;
+
   get mode(): ComputeMode {
-    if (isBrokerConfigured()) return { kind: 'real' };
-    return {
-      kind: 'mock',
-      reason: 'BROKER_PRIVATE_KEY not set — running in mock mode',
-    };
+    if (!isBrokerConfigured()) {
+      return { kind: 'mock', reason: 'BROKER_PRIVATE_KEY not set' };
+    }
+    if (this.brokerError) {
+      return { kind: 'mock', reason: `broker unavailable: ${this.brokerError}` };
+    }
+    return { kind: 'real' };
   }
 
   async listProviders(): Promise<unknown> {
     if (this.mode.kind === 'mock') {
-      return { mode: 'mock', providers: [] };
+      return { mode: 'mock', providers: [], reason: this.mode.reason };
     }
-    const broker = await getBroker();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return await (broker as any)?.inference?.listService?.();
+    try {
+      const broker = await getBroker();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return await (broker as any)?.inference?.listService?.();
+    } catch (err) {
+      this.brokerError = (err as Error).message;
+      return { mode: 'mock', providers: [], reason: this.brokerError };
+    }
   }
 
   async *chatStream(
     messages: ChatMessage[],
     opts: ChatStreamOptions = {},
   ): AsyncGenerator<ChatStreamYield, void, void> {
+    // Mock path covers: no broker key, broker init previously failed, or
+    // explicit mock mode.
     if (this.mode.kind === 'mock') {
       yield* mockChatStream(messages, opts);
       return;
     }
-    yield* this.realChatStream(messages, opts);
+    // Real path — but if broker init / provider lookup throws, mark the
+    // sticky error and fall back to mock so the user actually sees a reply
+    // instead of an SSE error event sitting forever.
+    try {
+      yield* this.realChatStream(messages, opts);
+    } catch (err) {
+      this.brokerError = (err as Error).message;
+      // eslint-disable-next-line no-console
+      console.warn(`[compute] broker call failed (${this.brokerError}) — falling back to mock`);
+      yield* mockChatStream(messages, opts);
+    }
   }
 
   private async *realChatStream(

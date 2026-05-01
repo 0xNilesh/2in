@@ -16,7 +16,7 @@ import { getThread, defaultDirectorThreadId, threads as seedThreads } from '../d
 import { useTwin } from '../hooks/useTwin.js';
 import { useStreamingChat } from '../hooks/useStreamingChat.js';
 import { ROUTES } from '../lib/routes.js';
-import { taskApi, finetuneApi, memoryApi } from '../lib/api.js';
+import { taskApi, finetuneApi, memoryApi, chatApi } from '../lib/api.js';
 import { specialists as rosterSpecialists } from '../data/specialists.js';
 import { pushToast } from '../hooks/useToasts.js';
 
@@ -80,6 +80,11 @@ function ChatBody({ threadId, twin, seed, onNewChat, openTask }) {
   const lastTaskCueRef = useRef(null);
   const nav = useNavigate();
   const loc = useLocation();
+  const [mode, setMode] = useState(null);
+
+  useEffect(() => {
+    chatApi.mode().then(setMode).catch(() => setMode(null));
+  }, []);
 
   // Persist extension to localStorage whenever it changes.
   useEffect(() => {
@@ -226,8 +231,12 @@ function ChatBody({ threadId, twin, seed, onNewChat, openTask }) {
             {twin.name} <span style={{ color: 'var(--text-faint)' }}>·</span> {seed.title}
           </div>
           <div className="sub">
-            <span style={{ color: isStreaming ? 'var(--peach)' : 'var(--mint)' }}>●</span>{' '}
-            {isStreaming ? 'thinking…' : `${twin.status} · master twin · ${twin.model}`}
+            <span style={{ color: isStreaming ? 'var(--peach)' : mode?.mode === 'real' ? 'var(--mint)' : 'var(--amber)' }}>●</span>{' '}
+            {isStreaming
+              ? 'thinking…'
+              : mode?.mode === 'real'
+                ? `${twin.status} · master twin · ${twin.model} · 0G compute · live`
+                : `${twin.status} · master twin · ${twin.model} · mock${mode?.reason ? ` · ${mode.reason.slice(0, 60)}${mode.reason.length > 60 ? '…' : ''}` : ''}`}
           </div>
         </div>
         <div className="right" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
