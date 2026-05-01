@@ -73,6 +73,7 @@ function detectPattern(text) {
     'daily-post',
     'with-research',
     'weekly-plan',
+    'weekly-review',
     'dm-reply',
     'audit-week',
     'visual-post',

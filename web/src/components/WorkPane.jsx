@@ -73,6 +73,7 @@ export function WorkPane() {
         <span className="work-meta-v">{task.progress.current}/{task.progress.total}</span>
         {task.elapsed ? <><span className="work-meta-k">elapsed</span><span className="work-meta-v">{task.elapsed}</span></> : null}
         {task.cost ? <><span className="work-meta-k">cost</span><span className="work-meta-v">{task.cost}</span></> : null}
+        <MemoryTraffic steps={task.steps} />
       </div>
 
       <div className="work-scroll">
@@ -273,6 +274,27 @@ function Step({ step }) {
 function abbr(type) {
   const map = { episodic: 'ep', semantic: 'sem', relationship: 'rel', temporal: 'tmp', procedural: 'proc', working: 'wrk' };
   return map[type] ?? type;
+}
+
+function MemoryTraffic({ steps }) {
+  if (!steps?.length) return null;
+  let reads = 0;
+  let writes = 0;
+  for (const s of steps) {
+    if (s.memRead) reads += s.memRead.count ?? 0;
+    if (s.memWrite) writes += s.memWrite.count ?? 0;
+  }
+  if (reads === 0 && writes === 0) return null;
+  return (
+    <>
+      <span className="work-meta-k">memory</span>
+      <span className="work-meta-v" style={{ fontFamily: 'Geist Mono, monospace' }}>
+        <span style={{ color: 'var(--mint)' }}>↓{reads}</span>
+        {' · '}
+        <span style={{ color: 'var(--peach)' }}>↑{writes}</span>
+      </span>
+    </>
+  );
 }
 
 // Convert the live SSE snapshot into the same shape getTask() returns.

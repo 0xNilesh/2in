@@ -173,6 +173,25 @@ export const PATTERNS: Record<string, Pattern> = {
       { idx: 3, agent: 'editor', label: 'Final pass' },
     ],
   },
+  'weekly-review': {
+    id: 'weekly-review',
+    title: 'weekly-review',
+    description: 'Four-specialist swarm review of the week. Strategist scores the cadence, Researcher pulls performance, Editor scans procedural rules, Companion checks relationships. Use for "weekly review", "how did this week go", "swarm review".',
+    steps: [
+      {
+        idx: 1, agent: 'researcher', label: 'Pull recent performance from episodic',
+      },
+      {
+        idx: 2, agent: 'strategist', label: 'Score cadence + temporal patterns',
+      },
+      {
+        idx: 3, agent: 'editor', label: 'Cross-check procedural rules',
+      },
+      {
+        idx: 4, agent: 'companion', label: 'Reflect on relationship updates',
+      },
+    ],
+  },
   'clip-shorts': {
     id: 'clip-shorts',
     title: 'clip-shorts',
@@ -204,8 +223,9 @@ If no pattern is a clean fit, default to "daily-post".`;
 
 function regexFallback(userInput: string): string {
   const lower = userInput.toLowerCase();
-  if (/(weekly|plan|theme|cadence|schedule|roadmap)/.test(lower)) return 'weekly-plan';
-  if (/(audit|review week|recap|score|reflection)/.test(lower)) return 'audit-week';
+  if (/(weekly review|review the week|swarm review|how (did|was) (this |last )?week|review my week)/.test(lower)) return 'weekly-review';
+  if (/(weekly plan|plan|theme|cadence|schedule|roadmap)/.test(lower)) return 'weekly-plan';
+  if (/(audit|recap|score|reflection)/.test(lower)) return 'audit-week';
   if (/(dm|reply|message|email|respond)/.test(lower)) return 'dm-reply';
   if (/(sponsor|brand|deal|paid|#ad|endorsement|negotiate)/.test(lower)) return 'sponsor-reply';
   if (/(image|cover|picture|art|visual|reel)/.test(lower)) return 'visual-post';
