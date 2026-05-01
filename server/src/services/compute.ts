@@ -68,20 +68,53 @@ export interface ComputeMode {
   endpoint?: string;
 }
 
+// How long we stay in fallback after a real-mode failure before retrying.
+// Rate limits (429) typically reset within a minute; auth + network errors
+// usually need more time but a 30s cooldown gives the user a fast recovery.
+const REAL_MODE_COOLDOWN_MS = 30_000;
+
 export class ComputeService {
   private brokerError: string | null = null;
+  private brokerErrorAt: number | null = null;
   private routerError: string | null = null;
+  private routerErrorAt: number | null = null;
+
+  // Should the real path retry now (cooldown elapsed) or stay mock?
+  private inCooldown(at: number | null): boolean {
+    return at != null && Date.now() - at < REAL_MODE_COOLDOWN_MS;
+  }
+
+  private maybeClearRouter(): void {
+    if (this.routerError && !this.inCooldown(this.routerErrorAt)) {
+      this.routerError = null;
+      this.routerErrorAt = null;
+    }
+  }
+
+  private maybeClearBroker(): void {
+    if (this.brokerError && !this.inCooldown(this.brokerErrorAt)) {
+      this.brokerError = null;
+      this.brokerErrorAt = null;
+    }
+  }
 
   get mode(): ComputeMode {
-    if (hasRouter() && !this.routerError) {
+    this.maybeClearRouter();
+    this.maybeClearBroker();
+
+    if (hasRouter()) {
+      if (this.routerError) {
+        const remaining = Math.ceil((REAL_MODE_COOLDOWN_MS - (Date.now() - (this.routerErrorAt ?? 0))) / 1000);
+        return {
+          kind: 'mock',
+          reason: `${isAdvanced() ? 'advanced' : 'router'} cooling down (${remaining}s) · ${this.routerError.slice(0, 80)}`,
+        };
+      }
       return {
         kind: isAdvanced() ? 'advanced' : 'router',
         model: config.DIRECTOR_MODEL,
         endpoint: config.ZG_PROVIDER_URL ?? config.ZG_PROVIDER_ADDRESS ?? config.ZG_ROUTER_URL,
       };
-    }
-    if (this.routerError) {
-      return { kind: 'mock', reason: `${isAdvanced() ? 'advanced' : 'router'} unavailable: ${this.routerError}` };
     }
     if (!isBrokerConfigured()) {
       return { kind: 'mock', reason: 'no ZG_ROUTER_API_KEY and no BROKER_PRIVATE_KEY set' };
@@ -105,6 +138,7 @@ export class ComputeService {
       return await (broker as any)?.inference?.listService?.();
     } catch (err) {
       this.brokerError = (err as Error).message;
+      this.brokerErrorAt = Date.now();
       return { mode: 'mock', providers: [], reason: this.brokerError };
     }
   }
@@ -124,6 +158,7 @@ export class ComputeService {
         return;
       } catch (err) {
         this.routerError = (err as Error).message;
+        this.routerErrorAt = Date.now();
         // eslint-disable-next-line no-console
         console.warn(`[compute] ${m.kind} call failed (${this.routerError}) — falling back to mock`);
         yield* mockChatStream(messages, opts);
@@ -135,6 +170,7 @@ export class ComputeService {
       yield* this.realChatStream(messages, opts);
     } catch (err) {
       this.brokerError = (err as Error).message;
+      this.brokerErrorAt = Date.now();
       // eslint-disable-next-line no-console
       console.warn(`[compute] broker call failed (${this.brokerError}) — falling back to mock`);
       yield* mockChatStream(messages, opts);
