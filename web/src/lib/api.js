@@ -87,3 +87,27 @@ export const personaApi = {
       body: JSON.stringify({ tweets, twin }),
     }).then(unwrap),
 };
+
+export const finetuneApi = {
+  mode: () => fetch(url('/api/finetune/mode')).then(unwrap),
+  start: (specialistId, opts = {}) =>
+    fetch(url('/api/finetune/start'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ specialistId, ...opts }),
+    }).then(unwrap),
+  get: (jobId) => fetch(url(`/api/finetune/jobs/${jobId}`)).then(unwrap),
+  listForSpecialist: (id) =>
+    fetch(url(`/api/finetune/specialists/${encodeURIComponent(id)}/jobs`)).then(unwrap),
+};
+
+export const chainApi = {
+  mode: () => fetch(url('/api/chain/mode')).then(unwrap),
+  twin: (tokenId) => fetch(url(`/api/chain/twin/${tokenId}`)).then(unwrap),
+  delegate: (tokenId, delegate, txHash) =>
+    fetch(url('/api/chain/delegate'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tokenId, delegate, txHash }),
+    }).then(unwrap),
+};

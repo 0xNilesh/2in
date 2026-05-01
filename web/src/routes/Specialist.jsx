@@ -11,12 +11,189 @@ import { getSpecialist } from '../data/specialists.js';
 import { ROUTES } from '../lib/routes.js';
 import { gatewayUrl } from '../lib/format.js';
 import { useTwinNft } from '../hooks/useTwinNft.js';
+import { useSpecialistJobs } from '../hooks/useSpecialistJobs.js';
+import { useFineTuneJob } from '../hooks/useFineTuneJob.js';
+import { finetuneApi } from '../lib/api.js';
 
 const snapshotHistory = [
   { idx: 12, when: '14m ago', from: '0x88b1…0042', to: '0x88c0…d013', delta: 'rejection_memory +3 entries' },
   { idx: 11, when: '2d ago', from: '0x4a02…ffaa', to: '0x88b1…0042', delta: 'preference_memory override' },
   { idx: 10, when: '6d ago', from: '0x2cc0…1199', to: '0x4a02…ffaa', delta: 'voice_memory +24 examples' },
 ];
+
+function readTwitterCorpus() {
+  try {
+    return JSON.parse(window.localStorage.getItem('2in:corpus:twitter') ?? 'null');
+  } catch {
+    return null;
+  }
+}
+
+function TrainingSection({ specialist }) {
+  const { jobs, currentJob, refetch } = useSpecialistJobs(specialist.id);
+  const corpus = readTwitterCorpus();
+  const corpusSize = corpus?.tweets?.length ?? 0;
+  const liveJob = jobs.find((j) => j.status === 'live');
+  const adapter = liveJob?.adapterURI ?? specialist.adapterURI ?? null;
+  const canTrain = !currentJob && corpusSize > 0;
+  const startTrain = async () => {
+    try {
+      await finetuneApi.start(specialist.id, {
+        baseModel: 'Qwen2.5-0.5B-Instruct',
+        datasetUri: corpus?.rootHash ?? `0g://corpus/${specialist.id}`,
+      });
+      await refetch();
+    } catch (err) {
+      // eslint-disable-next-line no-alert
+      alert(err.message ?? 'training_start_failed');
+    }
+  };
+
+  return (
+    <section>
+      <div
+        className="label-mono"
+        style={{ marginBottom: 10, marginTop: 24, display: 'flex', alignItems: 'center', gap: 10 }}
+      >
+        <span>Training history · LoRA fine-tune</span>
+        {currentJob ? (
+          <StatusPill color={currentJob.status === 'training' ? 'peach' : 'amber'}>
+            {currentJob.status}
+          </StatusPill>
+        ) : adapter ? (
+          <StatusPill color="mint">live · adapter loaded</StatusPill>
+        ) : (
+          <StatusPill color="muted">no adapter</StatusPill>
+        )}
+      </div>
+
+      {currentJob ? <LiveTrainingCard jobId={currentJob.id} /> : null}
+
+      {!currentJob && !adapter ? (
+        <div className="card" style={{ padding: 16 }}>
+          <div className="card-row">
+            <div className="grow">
+              <div className="card-title">
+                Train {specialist.name} on {corpusSize > 0 ? corpusSize : 'your'} {corpusSize > 0 ? 'recent posts' : 'corpus'}
+              </div>
+              <div className="card-sub">
+                Spawns a fine-tune on Qwen2.5-0.5B-Instruct via 0G Compute. Cost: 0.5 0G, ~30 min.
+              </div>
+            </div>
+            <button className="btn btn-peach" onClick={startTrain} disabled={!canTrain}>
+              Train now →
+            </button>
+          </div>
+          {!canTrain ? (
+            <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--text-faint)' }}>
+              Connect a corpus from onboarding to enable training.
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {jobs.length > 0 ? (
+        <div className="table-card" style={{ marginTop: 12 }}>
+          <div className="table-row head" style={{ '--cols': '1.4fr 110px 110px 1.6fr 110px' }}>
+            <span>job</span>
+            <span>status</span>
+            <span>progress</span>
+            <span>adapter</span>
+            <span>started</span>
+          </div>
+          {jobs.map((j) => (
+            <div key={j.id} className="table-row" style={{ '--cols': '1.4fr 110px 110px 1.6fr 110px' }}>
+              <span style={{ fontFamily: 'Geist Mono, monospace', fontSize: 11.5, color: 'var(--peach)' }}>
+                {j.id}
+              </span>
+              <span>
+                <StatusPill color={statusColor(j.status)}>{j.status}</StatusPill>
+              </span>
+              <span style={{ fontFamily: 'Geist Mono, monospace', fontSize: 11.5, color: 'var(--text-2)' }}>
+                {j.progress}%
+              </span>
+              <span style={{ fontFamily: 'Geist Mono, monospace', fontSize: 11, color: 'var(--text-2)' }}>
+                {j.adapterURI ? `${j.adapterURI.slice(0, 10)}…${j.adapterURI.slice(-6)}` : '—'}
+              </span>
+              <span style={{ fontFamily: 'Geist Mono, monospace', fontSize: 11, color: 'var(--text-faint)' }}>
+                {new Date(j.startedAt).toLocaleTimeString()}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function LiveTrainingCard({ jobId }) {
+  const job = useFineTuneJob(jobId);
+  return (
+    <div
+      className="card"
+      style={{
+        padding: 16,
+        borderColor: 'var(--peach)',
+        background: 'var(--peach-04)',
+      }}
+    >
+      <div className="card-row">
+        <div className="grow">
+          <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            Training in progress
+            <StatusPill color={statusColor(job.status)}>{job.status}</StatusPill>
+          </div>
+          <div className="card-sub" style={{ marginTop: 4, fontFamily: 'Geist Mono, monospace' }}>
+            {job.meta?.baseModel ?? 'Qwen2.5-0.5B-Instruct'}
+            {job.etaSeconds != null ? ` · ~${job.etaSeconds}s left` : ''}
+          </div>
+        </div>
+        <div style={{ fontSize: 24, fontWeight: 600, color: 'var(--peach)' }}>{job.progress}%</div>
+      </div>
+      <div
+        style={{
+          marginTop: 12,
+          height: 6,
+          borderRadius: 3,
+          background: 'var(--bg-soft-2)',
+          overflow: 'hidden',
+        }}
+      >
+        <div
+          style={{
+            height: '100%',
+            width: `${job.progress}%`,
+            background: 'linear-gradient(90deg, var(--peach-warm), var(--peach-press))',
+            transition: 'width 600ms ease',
+          }}
+        />
+      </div>
+      {job.error ? (
+        <div style={{ marginTop: 8, fontSize: 12, color: 'var(--red)' }}>error: {job.error}</div>
+      ) : null}
+      {job.adapterURI ? (
+        <div
+          style={{
+            marginTop: 8,
+            fontFamily: 'Geist Mono, monospace',
+            fontSize: 11,
+            color: 'var(--mint)',
+          }}
+        >
+          adapter delivered · {job.adapterURI.slice(0, 12)}…{job.adapterURI.slice(-8)}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function statusColor(status) {
+  if (status === 'training' || status === 'queued') return 'peach';
+  if (status === 'delivered') return 'amber';
+  if (status === 'live') return 'mint';
+  if (status === 'failed') return 'red';
+  return 'muted';
+}
 
 function shortHash(h, head = 8, tail = 6) {
   if (!h) return '—';
@@ -147,6 +324,8 @@ export default function Specialist() {
               </div>
             </div>
           </section>
+
+          {!isDirector ? <TrainingSection specialist={s} /> : null}
 
           <section>
             <div className="label-mono" style={{ marginBottom: 10 }}>Snapshot history · updateMetadata</div>
