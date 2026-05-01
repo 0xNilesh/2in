@@ -27,6 +27,7 @@ import { SocialIcon } from '../components/SocialIcon.jsx';
 import { personaApi, storageApi } from '../lib/api.js';
 import { useMintRoster } from '../hooks/useMintRoster.js';
 import { isChainConfigured } from '../lib/chain.js';
+import { useViemWalletClient } from '../lib/privy-signer.js';
 
 const STEPS = ['connect', 'ingest', 'name', 'mint', 'ready'];
 
@@ -728,11 +729,12 @@ function Mint({ twinName, twitter, walletAddress }) {
     : `0g://master/${name}`;
   const onChain = isChainConfigured();
 
-  // Privy embedded wallet exposes a wallet client adapter via wallets[0].getEthereumProvider().
-  // For now, leave signer null (mock mode); real-mode wiring lands when we
-  // also have a deployed contract address. In real mode the writes will
-  // route through this signer.
-  const signer = null;
+  // Real chain mode requires both a deployed contract AND an authenticated
+  // Privy wallet. When either is missing, useMintRoster falls back to mock
+  // (deterministic tx hashes + 1s delays).
+  const signerCtx = useViemWalletClient();
+  const signer = onChain ? signerCtx.walletClient : null;
+  const signerReady = onChain ? signerCtx.ready : true;
 
   const { rows, start, running, done } = useMintRoster({
     twinName: name,
@@ -742,12 +744,15 @@ function Mint({ twinName, twitter, walletAddress }) {
   });
 
   // Auto-start the mint sequence once when the user lands on this step.
+  // Wait for the signer to resolve when chain is configured (otherwise we'd
+  // fire mock mints even with a real contract available).
   useEffect(() => {
+    if (!signerReady) return;
     if (!running && !done && rows.every((r) => r.status === 'pending')) {
       void start();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [signerReady]);
 
   const subTextFor = (r) => {
     if (r.id === 'master') return `mint() → tokenId ${r.tokenId ? `#${r.tokenId}` : '…'}`;
@@ -831,12 +836,18 @@ function Mint({ twinName, twitter, walletAddress }) {
           fontFamily: 'Geist Mono, monospace',
         }}
       >
-        <span style={{ color: onChain ? 'var(--mint)' : 'var(--amber)' }}>●</span>
-        <span>{onChain ? 'on-chain (Galileo)' : 'mock mode'}</span>
+        <span style={{ color: onChain && signer ? 'var(--mint)' : 'var(--amber)' }}>●</span>
+        <span>{onChain && signer ? 'on-chain (Galileo)' : onChain ? 'awaiting signer…' : 'mock mode'}</span>
         <span>·</span>
         <span>chain id 16602</span>
         <span>·</span>
         <span>contract {onChain ? '✓ deployed' : 'unset'}</span>
+        {onChain && !signer && signerCtx.ready ? (
+          <>
+            <span>·</span>
+            <span style={{ color: 'var(--red)' }}>{signerCtx.error ?? 'no signer'}</span>
+          </>
+        ) : null}
       </div>
 
       <div
