@@ -1,13 +1,15 @@
 // Per-task event bus. Thin wrapper over `lib/event-bus.ts` (generic factory).
 //
 // Events the UI consumes (matched in WorkPane):
-//   meta            — { task: { id, title, pattern, status, totalSteps } }
-//   step.start      — { idx, agent, label }
-//   step.token      — { idx, delta }
-//   step.tool       — { idx, name, args, result }
-//   step.done       — { idx, output, elapsed }
-//   task.done       — { id, status, finalOutput, cost }
-//   task.error      — { id, message }
+//   meta              — { task: { id, title, pattern, status, totalSteps } }
+//   step.start        — { idx, agent, label }
+//   step.token        — { idx, delta }
+//   step.tool         — { idx, name, args, result }
+//   step.memory.read  — { idx, agent, types, count }
+//   step.memory.write — { idx, agent, types, count }
+//   step.done         — { idx, output, elapsed }
+//   task.done         — { id, status, finalOutput, cost }
+//   task.error        — { id, message }
 
 import { createBus, type BusSubscription } from '../lib/event-bus.js';
 
@@ -16,6 +18,8 @@ export type BusEvent =
   | { type: 'step.start'; idx: number; agent: string; label: string }
   | { type: 'step.token'; idx: number; delta: string }
   | { type: 'step.tool'; idx: number; name: string; args: unknown; result: unknown }
+  | { type: 'step.memory.read'; idx: number; agent: string; types: string[]; count: number }
+  | { type: 'step.memory.write'; idx: number; agent: string; types: string[]; count: number }
   | { type: 'step.done'; idx: number; output: string; elapsed: string }
   | { type: 'task.done'; id: string; status: string; finalOutput: string; cost: string }
   | { type: 'task.error'; id: string; message: string };

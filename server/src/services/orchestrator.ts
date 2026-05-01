@@ -12,7 +12,29 @@ import { compute, type ChatMessage } from './compute.js';
 import { systemPrompt, type AgentRole, type PromptContext } from './prompts.js';
 import { emit, openBus } from './bus.js';
 import { registry } from './tools/index.js';
+import {
+  encode as memEncode,
+  retrieveAndAnnounce,
+  recordEncode,
+  type MemoryType,
+  type MemoryEntry,
+} from './memory.js';
 import crypto from 'node:crypto';
+
+// Per-specialist memory routing. Each agent reads its assigned memory types
+// before its LLM call and writes its outputs to its assigned write types.
+// Specialists not in this map skip the memory step (defensive default).
+export const SPECIALIST_MEMORY: Record<AgentRole, { reads: MemoryType[]; writes: MemoryType[] }> = {
+  director:   { reads: [],                                              writes: [] },
+  writer:     { reads: ['semantic', 'episodic', 'temporal'],            writes: ['episodic'] },
+  researcher: { reads: ['episodic', 'temporal'],                        writes: ['semantic', 'episodic'] },
+  editor:     { reads: ['procedural', 'semantic'],                      writes: ['procedural'] },
+  strategist: { reads: ['temporal', 'episodic'],                        writes: ['temporal'] },
+  companion:  { reads: ['relationship', 'semantic'],                    writes: ['semantic', 'relationship'] },
+  voice:      { reads: ['semantic', 'episodic'],                        writes: ['episodic'] },
+  visual:     { reads: ['semantic'],                                    writes: ['episodic'] },
+  negotiator: { reads: ['relationship', 'procedural'],                  writes: ['relationship'] },
+};
 
 export interface PatternStep {
   idx: number;
@@ -329,6 +351,32 @@ async function runPattern({ taskId, initial, input }: RunArgs): Promise<void> {
       }
     }
 
+    // Memory read — fetch entries from this specialist's read types and
+    // prepend them as a context message before the LLM call. No LLM cost.
+    const memCfg = SPECIALIST_MEMORY[step.agent] ?? { reads: [], writes: [] };
+    let memoryContext: MemoryEntry[] = [];
+    if (memCfg.reads.length > 0) {
+      try {
+        memoryContext = await retrieveAndAnnounce({
+          types: memCfg.reads,
+          query: input.goal,
+          limit: 8,
+          twinId,
+          agent: step.agent,
+        });
+        emit(taskId, {
+          type: 'step.memory.read',
+          idx: step.idx,
+          agent: step.agent,
+          types: memCfg.reads,
+          count: memoryContext.length,
+        });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn(`[orchestrator] memory.retrieve failed for ${step.agent}: ${(err as Error).message}`);
+      }
+    }
+
     if (lastLlmAt !== 0) {
       const elapsed = Date.now() - lastLlmAt;
       const wait = STEP_PACE_MS - elapsed;
@@ -336,7 +384,7 @@ async function runPattern({ taskId, initial, input }: RunArgs): Promise<void> {
     }
     lastLlmAt = Date.now();
 
-    const messages = buildMessages(step.agent, input, stepOutputs);
+    const messages = buildMessages(step.agent, input, stepOutputs, memoryContext);
     const stepStart = Date.now();
     let buffer = '';
 
@@ -354,8 +402,33 @@ async function runPattern({ taskId, initial, input }: RunArgs): Promise<void> {
     }
 
     const elapsed = formatElapsed(Date.now() - stepStart);
-    emit(taskId, { type: 'step.done', idx: step.idx, output: buffer.trim(), elapsed });
-    stepOutputs.push({ agent: step.agent, output: buffer.trim() });
+    const output = buffer.trim();
+    emit(taskId, { type: 'step.done', idx: step.idx, output, elapsed });
+    stepOutputs.push({ agent: step.agent, output });
+
+    // Memory write — passthrough each specialist's output to its primary
+    // write type. Skips LLM extraction (would burn req/min budget); the
+    // specialist's full output is treated as one event-shaped entry.
+    if (memCfg.writes.length > 0 && output.length > 8) {
+      const writeType = memCfg.writes[0]!;
+      try {
+        const stored = await memEncode(
+          { kind: 'specialist-output', text: output, source: step.agent },
+          { twinId, agent: step.agent, passthrough: { type: writeType } },
+        );
+        recordEncode(step.agent, stored);
+        emit(taskId, {
+          type: 'step.memory.write',
+          idx: step.idx,
+          agent: step.agent,
+          types: [writeType],
+          count: stored.length,
+        });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn(`[orchestrator] memory.encode failed for ${step.agent}: ${(err as Error).message}`);
+      }
+    }
   }
 
   const finalOutput = stepOutputs.at(-1)?.output ?? '';
@@ -374,10 +447,26 @@ function buildMessages(
   agent: AgentRole,
   input: SpawnTaskInput,
   prior: Array<{ agent: AgentRole; output: string }>,
+  memoryCtx: MemoryEntry[] = [],
 ): ChatMessage[] {
   const sys = systemPrompt(agent, input.context);
   const messages: ChatMessage[] = [{ role: 'system', content: sys }];
   messages.push({ role: 'user', content: `Goal: ${input.goal}` });
+
+  if (memoryCtx.length > 0) {
+    const grouped = memoryCtx.reduce<Record<string, MemoryEntry[]>>((acc, e) => {
+      (acc[e.type] ??= []).push(e);
+      return acc;
+    }, {});
+    const lines = Object.entries(grouped).map(([type, entries]) => {
+      const items = entries.map((e, i) => `  ${i + 1}. ${e.text}`).join('\n');
+      return `From your ${type} memory:\n${items}`;
+    });
+    messages.push({
+      role: 'user',
+      content: `Memory context (use this to inform your output, don't quote it back):\n\n${lines.join('\n\n')}`,
+    });
+  }
 
   if (prior.length > 0) {
     const ctx = prior
