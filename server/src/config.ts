@@ -22,6 +22,13 @@ const Schema = z.object({
   BROKER_RPC: z.string().default('https://evmrpc-testnet.0g.ai'),
   DIRECTOR_MODEL: z.string().default('gpt-oss-120b'),
   SPECIALIST_MODEL: z.string().default('qwen-3.6-plus'),
+  // Galileo deployed compute contract addresses (PLAN.md §A). The broker
+  // SDK has defaults baked in but they may go stale — overriding here
+  // pins us to known-good values for this hackathon.
+  BROKER_LEDGER_CA: z.string().default('0xE70830508dAc0A97e6c087c75f402f9Be669E406'),
+  BROKER_INFERENCE_CA: z.string().default('0xa79F4c8311FF93C06b8CfB403690cc987c93F91E'),
+  BROKER_FINETUNE_CA: z.string().default('0xaC66eBd174435c04F1449BBa08157a707B6fa7b1'),
+  BROKER_INITIAL_FUND_OG: z.coerce.number().default(0.1),
 
   // 0G Storage. Same mock-fallback story: without STORAGE_PRIVATE_KEY,
   // uploads return deterministic fake hashes and KV is in-memory.
