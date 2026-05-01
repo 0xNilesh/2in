@@ -18,10 +18,19 @@ const Schema = z.object({
 
   // 0G Compute (broker). If BROKER_PRIVATE_KEY is unset, compute service runs
   // in mock mode (still streams over SSE; demo works without 0G funds).
+  // 0G Router — Direct API mode. Single OpenAI-compatible endpoint with
+  // a Bearer API key (app-sk-...). Get the key at https://pc.testnet.0g.ai
+  // → API Reference → "Create API key". Preferred over broker mode for
+  // simplicity; broker still works as fallback if this is unset.
+  ZG_ROUTER_URL: z.string().default('https://router-api-testnet.integratenetwork.work/v1/chat/completions'),
+  ZG_ROUTER_API_KEY: z.string().optional(),
+
+  // Broker mode — wallet-signed per-call. Used only if ZG_ROUTER_API_KEY
+  // isn't set. The 2.0.0 SDK has known setup issues; Router is preferred.
   BROKER_PRIVATE_KEY: z.string().optional(),
   BROKER_RPC: z.string().default('https://evmrpc-testnet.0g.ai'),
-  DIRECTOR_MODEL: z.string().default('gpt-oss-120b'),
-  SPECIALIST_MODEL: z.string().default('qwen-3.6-plus'),
+  DIRECTOR_MODEL: z.string().default('qwen/qwen-2.5-7b-instruct'),
+  SPECIALIST_MODEL: z.string().default('qwen/qwen-2.5-7b-instruct'),
   // Galileo deployed compute contract addresses (PLAN.md §A). The broker
   // SDK has defaults baked in but they may go stale — overriding here
   // pins us to known-good values for this hackathon.

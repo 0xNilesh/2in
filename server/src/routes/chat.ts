@@ -40,6 +40,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
   app.get('/chat/mode', async () => ({
     mode: compute.mode.kind,
     reason: compute.mode.reason ?? null,
+    model: compute.mode.model ?? null,
   }));
 
   app.post('/chat/director', async (req, reply) => {

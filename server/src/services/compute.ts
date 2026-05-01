@@ -1,18 +1,22 @@
 // 0G Compute service. One async-generator interface — `chatStream(messages, opts)`
-// — with two backends:
+// — with three backends, tried in order:
 //
-//   real  → @0glabs/0g-serving-broker (Router mode), wallet signs each call
-//   mock  → canned reply chunked on a 30ms cadence; same SSE shape
+//   router  → 0G Router OpenAI-compatible endpoint with Bearer API key.
+//             Set ZG_ROUTER_API_KEY (get one at pc.testnet.0g.ai → API
+//             Reference → Create API key). Preferred — simplest path.
+//   broker  → @0glabs/0g-serving-broker, wallet-signs each call. Used only
+//             if no Router key is set. The 2.0.0 SDK has known setup
+//             ceremonies that may fail silently.
+//   mock    → canned reply chunked on a 32ms cadence; same SSE shape.
 //
-// The frontend never knows which backend it's talking to. Both stream tokens
-// over SSE so the demo works whether or not BROKER_PRIVATE_KEY is set.
-//
-// Note: the broker SDK's surface has been churning rapidly (see Phase 1
-// snapshot). We isolate it behind this one file so future API drift only
-// touches `realChatStream`.
+// The frontend never knows which backend served — same wire format.
 
 import { config } from '../config.js';
 import { getBroker, isBrokerConfigured } from './broker.js';
+
+function hasRouter(): boolean {
+  return Boolean(config.ZG_ROUTER_API_KEY);
+}
 
 export type ChatRole = 'system' | 'user' | 'assistant';
 export interface ChatMessage {
@@ -35,28 +39,37 @@ export interface ChatStreamFinal {
 export type ChatStreamYield = ChatStreamChunk | ChatStreamFinal;
 
 export interface ComputeMode {
-  kind: 'real' | 'mock';
+  kind: 'router' | 'broker' | 'mock';
   reason?: string;
+  model?: string;
 }
 
 export class ComputeService {
-  // Sticky failure marker — once broker init blows up, stop retrying it
-  // every request and report mock with the actual error message.
   private brokerError: string | null = null;
+  private routerError: string | null = null;
 
   get mode(): ComputeMode {
+    if (hasRouter() && !this.routerError) {
+      return { kind: 'router', model: config.DIRECTOR_MODEL };
+    }
+    if (this.routerError) {
+      return { kind: 'mock', reason: `router unavailable: ${this.routerError}` };
+    }
     if (!isBrokerConfigured()) {
-      return { kind: 'mock', reason: 'BROKER_PRIVATE_KEY not set' };
+      return { kind: 'mock', reason: 'no ZG_ROUTER_API_KEY and no BROKER_PRIVATE_KEY set' };
     }
     if (this.brokerError) {
       return { kind: 'mock', reason: `broker unavailable: ${this.brokerError}` };
     }
-    return { kind: 'real' };
+    return { kind: 'broker' };
   }
 
   async listProviders(): Promise<unknown> {
-    if (this.mode.kind === 'mock') {
-      return { mode: 'mock', providers: [], reason: this.mode.reason };
+    if (hasRouter()) {
+      return { mode: 'router', endpoint: config.ZG_ROUTER_URL, model: config.DIRECTOR_MODEL };
+    }
+    if (!isBrokerConfigured()) {
+      return { mode: 'mock', providers: [], reason: 'no ZG_ROUTER_API_KEY and no BROKER_PRIVATE_KEY set' };
     }
     try {
       const broker = await getBroker();
@@ -72,15 +85,24 @@ export class ComputeService {
     messages: ChatMessage[],
     opts: ChatStreamOptions = {},
   ): AsyncGenerator<ChatStreamYield, void, void> {
-    // Mock path covers: no broker key, broker init previously failed, or
-    // explicit mock mode.
-    if (this.mode.kind === 'mock') {
+    const m = this.mode;
+    if (m.kind === 'mock') {
       yield* mockChatStream(messages, opts);
       return;
     }
-    // Real path — but if broker init / provider lookup throws, mark the
-    // sticky error and fall back to mock so the user actually sees a reply
-    // instead of an SSE error event sitting forever.
+    if (m.kind === 'router') {
+      try {
+        yield* this.routerChatStream(messages, opts);
+        return;
+      } catch (err) {
+        this.routerError = (err as Error).message;
+        // eslint-disable-next-line no-console
+        console.warn(`[compute] router call failed (${this.routerError}) — falling back to mock`);
+        yield* mockChatStream(messages, opts);
+        return;
+      }
+    }
+    // broker path
     try {
       yield* this.realChatStream(messages, opts);
     } catch (err) {
@@ -89,6 +111,59 @@ export class ComputeService {
       console.warn(`[compute] broker call failed (${this.brokerError}) — falling back to mock`);
       yield* mockChatStream(messages, opts);
     }
+  }
+
+  // === router (Direct API mode) =====================================
+  private async *routerChatStream(
+    messages: ChatMessage[],
+    opts: ChatStreamOptions,
+  ): AsyncGenerator<ChatStreamYield, void, void> {
+    const res = await fetch(config.ZG_ROUTER_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.ZG_ROUTER_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: opts.model ?? config.DIRECTOR_MODEL,
+        messages,
+        temperature: opts.temperature ?? 0.7,
+        stream: true,
+      }),
+    });
+    if (!res.ok || !res.body) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`router ${res.status}: ${text.slice(0, 200)}`);
+    }
+
+    const decoder = new TextDecoder();
+    const reader = res.body.getReader();
+    let buf = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, idx).trim();
+        buf = buf.slice(idx + 1);
+        if (!line.startsWith('data:')) continue;
+        const payload = line.slice(5).trim();
+        if (payload === '[DONE]') {
+          yield { done: true, finishReason: 'stop' };
+          return;
+        }
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const json: any = JSON.parse(payload);
+          const delta = json.choices?.[0]?.delta?.content ?? '';
+          if (delta) yield { delta };
+        } catch {
+          // skip malformed chunk
+        }
+      }
+    }
+    yield { done: true, finishReason: 'stop' };
   }
 
   private async *realChatStream(
