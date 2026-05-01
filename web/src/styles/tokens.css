@@ -1,0 +1,46 @@
+/* Design tokens — colors, type, spacing. Matches option-b template exactly. */
+:root {
+  /* surfaces */
+  --bg: #0b0a0d;
+  --bg-rail: #14141a;
+  --bg-soft: #1a1920;
+  --bg-soft-2: #232229;
+  --border: #26252e;
+  --border-soft: #1a1a22;
+  --border-strong: #34333d;
+
+  /* text */
+  --text: #ededf0;
+  --text-2: #cbcad1;
+  --text-mute: #9b9aa6;
+  --text-faint: #6f6e7a;
+  --text-ghost: #4a4955;
+
+  /* brand + status */
+  --peach: #ff8a5b;
+  --peach-deep: #d96d40;
+  --peach-warm: #ff9b6e;
+  --peach-press: #ff7e4f;
+  --mint: #5eead4;
+  --mint-2: #66d97a;
+  --amber: #f5b754;
+  --red: #ff7066;
+  --violet: #a78bfa;
+
+  /* peach tints */
+  --peach-04: rgba(255, 138, 91, 0.04);
+  --peach-07: rgba(255, 138, 91, 0.07);
+  --peach-10: rgba(255, 138, 91, 0.10);
+  --peach-14: rgba(255, 138, 91, 0.14);
+  --peach-16: rgba(255, 138, 91, 0.16);
+
+  /* status pills */
+  --mint-pill-bg: rgba(102, 217, 122, 0.12);
+  --mint-pill-fg: #66d97a;
+  --amber-pill-bg: rgba(245, 183, 84, 0.12);
+  --amber-pill-fg: #f5b754;
+  --red-pill-bg: rgba(255, 112, 102, 0.12);
+  --red-pill-fg: #ff7066;
+  --muted-pill-bg: #232229;
+  --muted-pill-fg: #9b9aa6;
+}

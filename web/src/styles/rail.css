@@ -1,0 +1,129 @@
+/* Left rail — team + nav. Verbatim from option-b template. */
+.rail {
+  width: 240px;
+  flex-shrink: 0;
+  background: var(--bg-rail);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+.rail-head {
+  height: 52px;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  gap: 8px;
+}
+.brand { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+.brand em { font-style: italic; font-weight: 500; color: var(--peach); }
+.rail-head .new {
+  margin-left: auto;
+  width: 26px; height: 26px;
+  border-radius: 6px;
+  background: var(--bg-soft);
+  color: var(--text-mute);
+  display: flex; align-items: center; justify-content: center;
+}
+.rail-scroll { flex: 1; overflow-y: auto; padding: 8px 0; }
+.section {
+  font-family: 'Geist Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding: 14px 16px 6px;
+}
+.nav-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 14px;
+  margin: 0 6px;
+  border-radius: 6px;
+  color: var(--text-2);
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.nav-row:hover { background: var(--bg-soft); }
+.nav-row.active { background: var(--peach-10); color: var(--text); position: relative; }
+.nav-row.active::before {
+  content: ""; position: absolute; left: -6px; top: 6px; bottom: 6px;
+  width: 3px; background: var(--peach); border-radius: 0 2px 2px 0;
+}
+.nav-row .ic {
+  width: 26px; height: 26px;
+  border-radius: 6px;
+  background: var(--bg-soft-2);
+  color: var(--text-mute);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px;
+}
+.nav-row.active .ic { background: var(--peach-14); color: var(--peach); }
+.nav-row .label { flex: 1; }
+.nav-row .id {
+  font-family: 'Geist Mono', monospace;
+  font-size: 10px;
+  color: var(--text-faint);
+  background: var(--bg-soft-2);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.nav-row.active .id { color: var(--peach); background: var(--peach-14); }
+
+/* Thread label/when (within Recent chats section) */
+.nav-row .thread-label {
+  font-size: 13px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0;
+}
+.nav-row .thread-when {
+  background: transparent;
+  color: var(--text-faint);
+  padding: 0;
+  font-size: 10px;
+}
+.nav-row.active .thread-when { color: var(--peach); background: transparent; }
+
+.add {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 14px;
+  margin: 4px 6px;
+  color: var(--text-mute);
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: 6px;
+  width: calc(100% - 12px);
+  text-align: left;
+}
+.add:hover { background: var(--bg-soft); color: var(--peach); }
+.add .ic {
+  width: 26px; height: 26px; border-radius: 6px; background: var(--bg-soft-2);
+  display: flex; align-items: center; justify-content: center; font-weight: 600;
+}
+
+.rail-foot {
+  border-top: 1px solid var(--border);
+  padding: 10px 12px;
+  display: flex; align-items: center; gap: 8px;
+}
+.wallet {
+  flex: 1; display: flex; align-items: center; gap: 8px;
+  background: var(--bg-soft);
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.ww { width: 22px; height: 22px; border-radius: 50%; background: linear-gradient(135deg, var(--peach), var(--violet)); }
+.wallet .meta { line-height: 1.2; min-width: 0; }
+.wallet .h { font-size: 12px; font-weight: 500; }
+.wallet .a { font-family: 'Geist Mono', monospace; font-size: 10px; color: var(--text-faint); }
+.deleg-pill {
+  padding: 3px 7px; border-radius: 5px;
+  background: var(--mint-pill-bg); color: var(--mint-pill-fg);
+  font-size: 9.5px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.06em;
+  display: flex; align-items: center; gap: 4px;
+}
+.deleg-pill::before { content: ""; width: 5px; height: 5px; background: var(--mint-2); border-radius: 50%; }

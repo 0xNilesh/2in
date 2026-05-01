@@ -1,0 +1,23 @@
+/* Reset + base typography. */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Geist', system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; color: inherit; cursor: pointer; border: 0; background: none; }
+a { color: inherit; text-decoration: none; }
+
+/* App layout */
+.app { display: flex; height: 100vh; min-height: 0; }
+.main { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+
+/* Generic scrolls + page padding */
+.scroll { flex: 1; overflow-y: auto; }
+.page { width: 100%; max-width: 1040px; margin: 0 auto; padding: 28px 28px 56px; }
+.page-narrow { max-width: 720px; }
+.page > * + * { margin-top: 22px; }

@@ -1,0 +1,29 @@
+/* Avatars — square w/ optional director-circle variant + status dot. */
+.av {
+  width: 26px; height: 26px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #4a4956, #2d2c36);
+  color: var(--text-2);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 600; font-size: 12px;
+  position: relative;
+}
+.av.dir {
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--peach), var(--peach-deep));
+  color: #1a0a04;
+}
+.av .dot {
+  position: absolute; right: -2px; bottom: -2px;
+  width: 8px; height: 8px; border-radius: 50%;
+  border: 2px solid var(--bg-rail);
+}
+.av .dot.mint { background: var(--mint); box-shadow: 0 0 6px var(--mint); }
+.av .dot.peach { background: var(--peach); box-shadow: 0 0 6px var(--peach); }
+
+/* Larger variants for chat heads / cards */
+.av-32 { width: 32px; height: 32px; font-size: 14px; }
+.av-40 { width: 40px; height: 40px; border-radius: 8px; font-size: 16px; }
+.av-40.dir { border-radius: 50%; }
+.av-56 { width: 56px; height: 56px; border-radius: 10px; font-size: 22px; }
+.av-56.dir { border-radius: 50%; }
