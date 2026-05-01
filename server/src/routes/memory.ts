@@ -1,33 +1,50 @@
-// Memory slice routes — typed KV reads/writes per slice.
+// Memory routes — typed read/write/encode/forget/stream over the memory
+// primitive layer (services/memory.ts).
 //
-//   GET  /api/memory/:slice/list?twin=42                  → { entries }
-//   POST /api/memory/:slice/write  body: { twin, value, who? }
-//   GET  /api/memory/:slice/root?twin=42                  → { rootHash, gatewayUrl }
+//   GET    /api/memory/list?twin=42                       → { types, counts }
+//   GET    /api/memory/:type/list?twin=42                 → { entries }
+//   POST   /api/memory/:type/write   body: { twin, value, who? }
+//   POST   /api/memory/encode        body: { twin, text, source?, agent? }
+//   DELETE /api/memory/:type/:id?twin=42                  → { ok }
+//   GET    /api/memory/:type/root?twin=42                 → { rootHash, gatewayUrl }
+//   GET    /api/memory/export?twin=42                     → JSON dump (file)
+//   GET    /api/memory/stream                              SSE — live memory events
 //
-// Slice ids: voice · preference · performance · rejection · relationship
-// twin = master tokenId namespace (default 42 for the demo)
+// Typed slices: episodic | semantic | relationship | temporal | procedural | working
+// Legacy aliases (voice/preference/performance/rejection/relationship) accepted on
+// the :type path and on the WriteBody so old clients keep working.
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { storage } from '../services/storage.js';
 import { recordWrite } from '../services/snapshot.js';
+import {
+  encode,
+  forget,
+  listAll,
+  countByType,
+  normalizeType,
+  store,
+  subscribeMemory,
+  MEMORY_TYPES,
+  streamIdFor,
+  type MemoryType,
+  type MemoryEntry,
+} from '../services/memory.js';
+import { sseStream, setSseHeaders } from '../lib/sse.js';
 import crypto from 'node:crypto';
 
-// Map slices to a default "owner" specialist for snapshot bookkeeping when
-// the route doesn't carry an explicit specialistId. Updated for the
-// role-only roster: voice writes belong to Writer, rejection patterns to
-// Editor, preferences to Strategist, relationship + performance to
-// Companion + Researcher respectively.
-const DEFAULT_OWNER: Record<string, string> = {
-  voice: 'writer',
-  rejection: 'editor',
-  preference: 'strategist',
+// Snapshot bookkeeping default owner per type. When a manual write lands and
+// no `who` was supplied, attribute it to the specialist most likely to own
+// that type so the snapshot counter still ticks against a real iNFT.
+const DEFAULT_OWNER: Record<MemoryType, string> = {
+  episodic: 'researcher',
+  semantic: 'companion',
   relationship: 'companion',
-  performance: 'researcher',
+  temporal: 'strategist',
+  procedural: 'editor',
+  working: 'director',
 };
-
-const SLICES = ['voice', 'preference', 'performance', 'rejection', 'relationship'] as const;
-type Slice = typeof SLICES[number];
 
 const WriteBody = z.object({
   twin: z.string().default('42'),
@@ -35,66 +52,136 @@ const WriteBody = z.object({
   who: z.string().optional(),
 });
 
+const EncodeBody = z.object({
+  twin: z.string().default('42'),
+  text: z.string().min(1),
+  source: z.string().optional(),
+  agent: z.string().optional(),
+});
+
 const ListQuery = z.object({
   twin: z.string().default('42'),
 });
 
-function streamId(twin: string, slice: Slice): string {
-  return `twin:${twin}:slice:${slice}`;
+function resolveType(raw: string): MemoryType {
+  const t = normalizeType(raw);
+  if (!t) throw new Error(`Unknown memory type: ${raw}`);
+  return t;
 }
 
 export async function memoryRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/memory/:slice/list', async (req) => {
-    const slice = (req.params as { slice: string }).slice as Slice;
-    if (!SLICES.includes(slice)) throw app.httpErrors.badRequest(`Unknown slice: ${slice}`);
+  // === Top-level list — counts per type =====================================
+  app.get('/memory/list', async (req) => {
     const q = ListQuery.parse(req.query);
-    const entries = await storage.listKv(streamId(q.twin, slice));
+    const counts = await countByType(q.twin);
+    return { types: MEMORY_TYPES, counts };
+  });
+
+  // === Per-type list ========================================================
+  app.get('/memory/:type/list', async (req) => {
+    const raw = (req.params as { type: string }).type;
+    let type: MemoryType;
+    try { type = resolveType(raw); } catch (err) { throw app.httpErrors.badRequest((err as Error).message); }
+    const q = ListQuery.parse(req.query);
+    const all = await listAll(q.twin);
     return {
-      entries: entries.map((e) => {
-        let parsed;
-        try { parsed = JSON.parse(e.value); } catch { parsed = { text: e.value }; }
-        return { key: e.key, ts: e.ts, ...parsed };
-      }),
+      type,
+      entries: all[type].map((e) => ({
+        id: e.id,
+        type: e.type,
+        text: e.text,
+        who: e.source,
+        ts: e.ts,
+        reinforcement: e.reinforcement,
+        stable: e.stable,
+      })),
     };
   });
 
-  app.post('/memory/:slice/write', async (req) => {
-    const slice = (req.params as { slice: string }).slice as Slice;
-    if (!SLICES.includes(slice)) throw app.httpErrors.badRequest(`Unknown slice: ${slice}`);
+  // === Manual write =========================================================
+  app.post('/memory/:type/write', async (req) => {
+    const raw = (req.params as { type: string }).type;
+    let type: MemoryType;
+    try { type = resolveType(raw); } catch (err) { throw app.httpErrors.badRequest((err as Error).message); }
     const body = WriteBody.parse(req.body);
-    const stream = streamId(body.twin, slice);
-    const key = `m-${crypto.randomBytes(6).toString('hex')}`;
     const provenance = body.who ?? 'manual';
-    const payload = JSON.stringify({
-      who: provenance,
+    const entry: MemoryEntry = {
+      id: crypto.randomBytes(6).toString('hex'),
+      type,
       text: body.value,
+      source: provenance,
       ts: Date.now(),
-    });
-    await storage.writeKv(stream, key, payload);
+      reinforcement: 1,
+      stable: false,
+    };
+    await store(entry, body.twin);
 
-    // Tick the snapshot counter for the slice's owner specialist. Manual
-    // writes via this endpoint count as 'manual' provenance unless the
-    // caller passed a different `who`.
-    const owner = DEFAULT_OWNER[slice] ?? 'director';
+    const owner = (provenance === 'manual' ? DEFAULT_OWNER[type] : provenance) ?? 'director';
     const trigger = provenance === 'manual' ? 'manual' : provenance === 'tool' ? 'tool' : 'feedback';
     const { snapshot, pending } = recordWrite({
       specialistId: owner,
-      slice,
+      slice: type,
       triggeredBy: trigger as 'manual' | 'tool' | 'feedback',
     });
-    return { key, stream, snapshot, pendingWrites: pending };
+    return { id: entry.id, type, snapshot, pendingWrites: pending };
   });
 
-  app.get('/memory/:slice/root', async (req) => {
-    const slice = (req.params as { slice: string }).slice as Slice;
-    if (!SLICES.includes(slice)) throw app.httpErrors.badRequest(`Unknown slice: ${slice}`);
+  // === LLM-driven encode ====================================================
+  app.post('/memory/encode', async (req) => {
+    const body = EncodeBody.parse(req.body);
+    const entries = await encode(
+      { kind: 'manual', text: body.text, source: body.source ?? 'manual' },
+      { twinId: body.twin, agent: body.agent },
+    );
+    return { count: entries.length, entries };
+  });
+
+  // === Forget ===============================================================
+  app.delete('/memory/:type/:id', async (req) => {
+    const { type: raw, id } = req.params as { type: string; id: string };
+    let type: MemoryType;
+    try { type = resolveType(raw); } catch (err) { throw app.httpErrors.badRequest((err as Error).message); }
     const q = ListQuery.parse(req.query);
-    const entries = await storage.listKv(streamId(q.twin, slice));
-    // Snapshot root = sha256 of the entries' canonicalised JSON. In real mode
-    // this would be the most recent updateMetadata root; for now we return
-    // a deterministic hash so the UI has a non-empty value to display.
+    const ok = await forget(id, type, q.twin);
+    return { ok };
+  });
+
+  // === Per-type root (deterministic snapshot of current entries) ============
+  app.get('/memory/:type/root', async (req) => {
+    const raw = (req.params as { type: string }).type;
+    let type: MemoryType;
+    try { type = resolveType(raw); } catch (err) { throw app.httpErrors.badRequest((err as Error).message); }
+    const q = ListQuery.parse(req.query);
+    const stream = streamIdFor(q.twin, type);
+    const entries = await storage.listKv(stream);
     const buf = Buffer.from(JSON.stringify(entries));
     const rootHash = '0x' + crypto.createHash('sha256').update(buf).digest('hex');
-    return { rootHash, gatewayUrl: storage.gatewayUrl(rootHash), entries: entries.length };
+    return { type, rootHash, gatewayUrl: storage.gatewayUrl(rootHash), entries: entries.length };
+  });
+
+  // === Full export ==========================================================
+  app.get('/memory/export', async (req, reply) => {
+    const q = ListQuery.parse(req.query);
+    const all = await listAll(q.twin);
+    reply.header('content-type', 'application/json');
+    reply.header('content-disposition', `attachment; filename="2in-memory-${q.twin}.json"`);
+    return { twin: q.twin, exportedAt: Date.now(), memory: all };
+  });
+
+  // === Live stream ==========================================================
+  app.get('/memory/stream', async (_req, reply) => {
+    const sub = subscribeMemory();
+    if (!sub) throw app.httpErrors.internalServerError('memory bus not initialised');
+
+    setSseHeaders(reply);
+    const sse = sseStream();
+    // Open with a hello so EventSource clients know they're connected.
+    sse.send('memory.hello', { ts: Date.now() });
+
+    const offEv = sub.on((ev) => sse.send(ev.type, ev));
+    const offClose = sub.onClose(() => { offEv(); offClose(); sse.close(); });
+    sse.stream.on('close', () => { offEv(); offClose(); });
+
+    return sse.stream;
   });
 }

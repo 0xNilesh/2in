@@ -2,6 +2,7 @@
 
 import { buildServer } from './server.js';
 import { config } from './config.js';
+import { startStabilizeWorker, stopStabilizeWorker } from './services/memory.js';
 
 async function main(): Promise<void> {
   const app = await buildServer();
@@ -13,9 +14,14 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // Background memory consolidation — promote high-reinforcement entries to
+  // stable every minute. Cheap (no LLM calls).
+  startStabilizeWorker(['42'], 60_000);
+
   const shutdown = async (signal: string): Promise<void> => {
     app.log.info({ signal }, 'shutting down');
     try {
+      stopStabilizeWorker();
       await app.close();
       process.exit(0);
     } catch (err) {

@@ -91,6 +91,23 @@ class StorageService {
     return Array.from(this.mockKv.get(stream)?.values() ?? []).sort((a, b) => b.ts - a.ts);
   }
 
+  // Read-modify-write helper. Returns the merged value if the key existed,
+  // null otherwise. Caller controls merge semantics by passing the merged
+  // string directly.
+  async updateKv(stream: string, key: string, value: string): Promise<boolean> {
+    const bucket = this.mockKv.get(stream);
+    if (!bucket || !bucket.has(key)) return false;
+    bucket.set(key, { key, value, ts: Date.now() });
+    return true;
+  }
+
+  async deleteKv(stream: string, key: string): Promise<boolean> {
+    const bucket = this.mockKv.get(stream);
+    if (!bucket || !bucket.has(key)) return false;
+    bucket.delete(key);
+    return true;
+  }
+
   // === real backend ============================================
   private async indexer(): Promise<unknown> {
     if (!this.indexerPromise) {
