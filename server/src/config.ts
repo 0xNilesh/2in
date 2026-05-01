@@ -1,0 +1,55 @@
+// Single source of truth for env. Throws at boot on invalid config — better
+// than discovering it at first request.
+
+import 'dotenv/config';
+import { z } from 'zod';
+
+const Schema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  PORT: z.coerce.number().int().positive().default(3001),
+  HOST: z.string().default('0.0.0.0'),
+  LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
+
+  TWITTER_CLIENT_ID: z.string().optional(),
+  TWITTER_CLIENT_SECRET: z.string().optional(),
+  TWITTER_REDIRECT_URI: z.string().url().default('http://localhost:5173/onboarding'),
+
+  CORS_ORIGINS: z.string().default('http://localhost:5173'),
+
+  // 0G Compute (broker). If BROKER_PRIVATE_KEY is unset, compute service runs
+  // in mock mode (still streams over SSE; demo works without 0G funds).
+  BROKER_PRIVATE_KEY: z.string().optional(),
+  BROKER_RPC: z.string().default('https://evmrpc-testnet.0g.ai'),
+  DIRECTOR_MODEL: z.string().default('gpt-oss-120b'),
+  SPECIALIST_MODEL: z.string().default('qwen-3.6-plus'),
+
+  // 0G Storage. Same mock-fallback story: without STORAGE_PRIVATE_KEY,
+  // uploads return deterministic fake hashes and KV is in-memory.
+  STORAGE_PRIVATE_KEY: z.string().optional(),
+  STORAGE_RPC: z.string().default('https://evmrpc-testnet.0g.ai'),
+  STORAGE_INDEXER: z.string().default('https://indexer-storage-testnet-turbo.0g.ai'),
+  STORAGE_GATEWAY: z.string().default('https://indexer-storage-turbo.0g.ai'),
+
+  // Chain (TwinINFT). Without CHAIN_CONTRACT_ADDRESS, /api/chain/* serves
+  // mock state so the demo works without a deployed contract.
+  CHAIN_CONTRACT_ADDRESS: z.string().regex(/^0x[a-fA-F0-9]{40}$/).optional(),
+  CHAIN_RPC: z.string().default('https://evmrpc-testnet.0g.ai'),
+  CHAIN_ID: z.coerce.number().default(16602),
+  CHAIN_EXPLORER: z.string().default('https://chainscan-galileo.0g.ai'),
+});
+
+const parsed = Schema.safeParse(process.env);
+if (!parsed.success) {
+  console.error('❌ Invalid environment configuration:');
+  console.error(parsed.error.flatten().fieldErrors);
+  process.exit(1);
+}
+
+export const config = parsed.data;
+
+export const corsOrigins =
+  config.CORS_ORIGINS.trim() === '*'
+    ? true
+    : config.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean);
+
+export const isProd = config.NODE_ENV === 'production';
