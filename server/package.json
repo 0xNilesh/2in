@@ -22,7 +22,8 @@
     "fastify": "^5.0.0",
     "pino-pretty": "^11.2.2",
     "viem": "^2.48.4",
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "zod-to-json-schema": "^3.25.2"
   },
   "devDependencies": {
     "@types/node": "^22.7.0",
