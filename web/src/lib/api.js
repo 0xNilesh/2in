@@ -1,0 +1,89 @@
+// Tiny client for the @2in/server backend. Hits /api/* (Vite dev proxies to :3001).
+
+const BASE = (import.meta.env.VITE_API_BASE ?? '').replace(/\/$/, '');
+
+function url(path) {
+  return `${BASE}${path}`;
+}
+
+async function unwrap(res) {
+  let body;
+  try { body = await res.json(); } catch { body = {}; }
+  if (!res.ok) {
+    const msg = body?.message ?? body?.error ?? `HTTP ${res.status}`;
+    const err = new Error(msg);
+    err.status = res.status;
+    err.body = body;
+    throw err;
+  }
+  return body;
+}
+
+export const twitterApi = {
+  // Returns { url, state } so the caller can do window.location = url.
+  authUrl: () => fetch(url('/api/twitter/auth-url')).then(unwrap),
+
+  // Exchanges OAuth code for a Twitter access token + identity.
+  exchange: (code, state) =>
+    fetch(url('/api/twitter/exchange'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, state }),
+    }).then(unwrap),
+
+  // Recent tweets for an authenticated user.
+  tweets: (accessToken, userId, max = 20) =>
+    fetch(url(`/api/twitter/tweets?userId=${encodeURIComponent(userId)}&max=${max}`), {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    }).then(unwrap),
+};
+
+export const healthApi = {
+  ping: () => fetch(url('/api/health')).then(unwrap),
+};
+
+export const chatApi = {
+  mode: () => fetch(url('/api/chat/mode')).then(unwrap),
+};
+
+export const taskApi = {
+  patterns: () => fetch(url('/api/task/patterns')).then(unwrap),
+  spawn: (goal, twin, pattern) =>
+    fetch(url('/api/task'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ goal, twin, pattern }),
+    }).then(unwrap),
+};
+
+export const storageApi = {
+  mode: () => fetch(url('/api/storage/mode')).then(unwrap),
+  upload: (content, contentType = 'text') =>
+    fetch(url('/api/storage/upload'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content, contentType }),
+    }).then(unwrap),
+};
+
+export const memoryApi = {
+  list: (slice, twin = '42') =>
+    fetch(url(`/api/memory/${slice}/list?twin=${encodeURIComponent(twin)}`)).then(unwrap),
+  write: (slice, value, twin = '42', who) =>
+    fetch(url(`/api/memory/${slice}/write`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ twin, value, who }),
+    }).then(unwrap),
+  root: (slice, twin = '42') =>
+    fetch(url(`/api/memory/${slice}/root?twin=${encodeURIComponent(twin)}`)).then(unwrap),
+};
+
+export const personaApi = {
+  extract: (tweets, twin) =>
+    fetch(url('/api/persona/extract'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tweets, twin }),
+    }).then(unwrap),
+};
