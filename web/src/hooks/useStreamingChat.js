@@ -66,11 +66,29 @@ export function useStreamingChat({ target = 'director' } = {}) {
   return { send, stop, isStreaming, partial, error, taskCue };
 }
 
+// Returns either an explicit pattern id, the sentinel '__auto__' (server
+// picks via LLM router), or null (no dispatch).
 function detectPattern(text) {
-  // Look for emphasized pattern names — the mock director uses **name**.
-  const patterns = ['with-legal-review', 'content-draft', 'clip-pipeline'];
+  const patterns = [
+    'daily-post',
+    'with-research',
+    'weekly-plan',
+    'dm-reply',
+    'audit-week',
+    'visual-post',
+    'sponsor-reply',
+    'clip-shorts',
+  ];
   for (const p of patterns) {
-    if (text.includes(`**${p}**`) || text.includes(p)) return p;
+    if (text.includes(p)) return p;
   }
+  // Director didn't name a pattern but used a dispatch verb — let the
+  // server's LLM router decide. Common phrasings:
+  //   "Dispatching Writer..."  / "I'll dispatch..."
+  //   "Routing through..."     / "Spawning a task..."
+  //   "Kicking off..."         / "Handing this to..."
+  //   "I'll have Researcher and Editor..."
+  const dispatchVerbs = /\b(dispatch(ing|ed)?|i'?ll (route|spawn|run|kick off|hand|have)|spawn(ing)?|routing through|kicking off|handing this to)\b/i;
+  if (dispatchVerbs.test(text)) return '__auto__';
   return null;
 }

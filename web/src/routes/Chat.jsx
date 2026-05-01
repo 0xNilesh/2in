@@ -136,7 +136,10 @@ function ChatBody({ threadId, twin, seed, onNewChat, openTask }) {
       try {
         const goalMsg = [...allMessages].reverse().find((m) => m.kind === 'user');
         const goal = (goalMsg?.text && (Array.isArray(goalMsg.text) ? goalMsg.text.join(' ') : goalMsg.text)) ?? 'unspecified';
-        const { taskId } = await taskApi.spawn(goal, twin, taskCue);
+        // taskCue '__auto__' means director used a dispatch verb but didn't
+        // name a specific pattern — let the server's LLM router pick.
+        const explicitPattern = taskCue === '__auto__' ? undefined : taskCue;
+        const { taskId } = await taskApi.spawn(goal, twin, explicitPattern);
         setExtension((ext) => [
           ...ext,
           {
