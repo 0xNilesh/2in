@@ -9,12 +9,14 @@
 //      with a hardcoded taskRef still demo nicely
 
 import { useSearchParams } from 'react-router-dom';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Avatar } from './Avatar.jsx';
 import { StatusPill } from './StatusPill.jsx';
 import { getTask, stepStatusColor } from '../data/tasks.js';
 import { getSpecialist } from '../data/specialists.js';
 import { useTaskStream } from '../hooks/useTaskStream.js';
+import { feedbackApi } from '../lib/api.js';
+import { pushToast } from '../hooks/useToasts.js';
 
 export function WorkPane() {
   const [params, setParams] = useSearchParams();
@@ -71,13 +73,94 @@ export function WorkPane() {
       </div>
 
       {task.status === 'awaiting-approval' || task.status === 'running' ? (
-        <footer className="work-foot">
-          <button className="btn">Reject</button>
-          <button className="btn">Edit</button>
-          <button className="btn btn-peach">Approve</button>
-        </footer>
+        <FeedbackFooter taskId={taskId} task={task} onClose={close} />
       ) : null}
     </aside>
+  );
+}
+
+function FeedbackFooter({ taskId, task, onClose }) {
+  const [busy, setBusy] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState('');
+
+  const lastSpecialist = task.steps?.[task.steps.length - 1]?.agent;
+
+  const approve = async () => {
+    setBusy(true);
+    try {
+      const res = await feedbackApi.approve(taskId);
+      pushToast({
+        kind: 'success',
+        title: `Approved · saved to ${res.specialistId}'s voice_memory`,
+        body: res.snapshot
+          ? `Snapshot fired · updateMetadata(#${res.snapshot.tokenId}) · ${res.snapshot.delta}`
+          : `${res.pendingWrites}/3 writes until next snapshot`,
+      });
+      onClose?.();
+    } catch (err) {
+      pushToast({ kind: 'error', title: 'Approve failed', body: err.message ?? 'try again' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitReject = async () => {
+    if (!reason.trim()) return;
+    setBusy(true);
+    try {
+      const res = await feedbackApi.reject(taskId, { reason: reason.trim() });
+      pushToast({
+        kind: 'warn',
+        title: `Rejected · saved to ${res.specialistId}'s rejection_memory`,
+        body: res.snapshot
+          ? `Snapshot fired · updateMetadata(#${res.snapshot.tokenId}) · ${res.snapshot.delta}`
+          : `${res.pendingWrites}/3 writes until next snapshot`,
+      });
+      onClose?.();
+    } catch (err) {
+      pushToast({ kind: 'error', title: 'Reject failed', body: err.message ?? 'try again' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (rejecting) {
+    return (
+      <footer className="work-foot" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+        <input
+          autoFocus
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') submitReject(); }}
+          placeholder={`Why are we rejecting ${lastSpecialist ?? 'this'}'s output?`}
+          style={{
+            padding: '10px 12px',
+            background: 'var(--bg)',
+            border: '1px solid var(--border-strong)',
+            borderRadius: 8,
+            color: 'var(--text)',
+            font: 'inherit', fontSize: 13, outline: 0,
+          }}
+        />
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button className="btn" onClick={() => setRejecting(false)} disabled={busy}>Cancel</button>
+          <button className="btn btn-peach" onClick={submitReject} disabled={busy || !reason.trim()}>
+            {busy ? 'saving…' : 'Save reason'}
+          </button>
+        </div>
+      </footer>
+    );
+  }
+
+  return (
+    <footer className="work-foot">
+      <button className="btn" onClick={() => setRejecting(true)} disabled={busy}>Reject</button>
+      <button className="btn" disabled>Edit</button>
+      <button className="btn btn-peach" onClick={approve} disabled={busy}>
+        {busy ? 'saving…' : 'Approve'}
+      </button>
+    </footer>
   );
 }
 

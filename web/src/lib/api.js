@@ -112,6 +112,23 @@ export const chainApi = {
     }).then(unwrap),
 };
 
+export const feedbackApi = {
+  approve: (taskId, body = {}) =>
+    fetch(url(`/api/task/${encodeURIComponent(taskId)}/approve`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(unwrap),
+  reject: (taskId, body) =>
+    fetch(url(`/api/task/${encodeURIComponent(taskId)}/reject`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(unwrap),
+  snapshots: (tokenId) =>
+    fetch(url(`/api/chain/snapshots/${tokenId}`)).then(unwrap),
+};
+
 export const toolsApi = {
   list: () => fetch(url('/api/tools')).then(unwrap),
   get: (name) => fetch(url(`/api/tools/${encodeURIComponent(name)}`)).then(unwrap),
