@@ -25,14 +25,28 @@ export function WorkPane() {
   const live = useTaskStream(taskId);
   const isLive = Boolean(live.meta);
 
-  // Build a uniform shape from either source.
+  // Build a uniform shape from either source. If neither has data yet
+  // (SSE connecting, runtime task), render a "connecting" placeholder
+  // instead of returning null — otherwise the user clicks the TaskCard
+  // and nothing visible happens.
   const task = useMemo(() => {
     if (isLive) return mergeLive(live);
-    return getTask(taskId);
+    const seed = getTask(taskId);
+    if (seed) return seed;
+    return {
+      id: taskId,
+      title: 'Connecting…',
+      pattern: '—',
+      status: live.error ? 'failed' : 'pending',
+      cost: null,
+      elapsed: null,
+      progress: { current: 0, total: 0 },
+      steps: [],
+      error: live.error,
+    };
   }, [isLive, live, taskId]);
 
   if (!taskId) return null;
-  if (!task) return null;
 
   const close = () => {
     const next = new URLSearchParams(params);
