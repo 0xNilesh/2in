@@ -206,6 +206,43 @@ function Step({ step }) {
         </div>
       </div>
 
+      {step.memRead || step.memWrite ? (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '6px 0 8px 38px' }}>
+          {step.memRead ? (
+            <span
+              style={{
+                fontSize: 10.5,
+                color: 'var(--mint)',
+                background: 'rgba(94,234,212,0.08)',
+                border: '1px solid rgba(94,234,212,0.25)',
+                borderRadius: 999,
+                padding: '2px 8px',
+                fontFamily: 'Geist Mono, monospace',
+              }}
+              title={`Read ${step.memRead.count} entries from ${step.memRead.types.join(', ')}`}
+            >
+              ↓ {step.memRead.count} · {step.memRead.types.map(abbr).join(' ')}
+            </span>
+          ) : null}
+          {step.memWrite ? (
+            <span
+              style={{
+                fontSize: 10.5,
+                color: 'var(--peach)',
+                background: 'rgba(255,138,91,0.08)',
+                border: '1px solid rgba(255,138,91,0.25)',
+                borderRadius: 999,
+                padding: '2px 8px',
+                fontFamily: 'Geist Mono, monospace',
+              }}
+              title={`Wrote ${step.memWrite.count} entries to ${step.memWrite.types.join(', ')}`}
+            >
+              ↑ {step.memWrite.count} · {step.memWrite.types.map(abbr).join(' ')}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
       {step.tools?.length ? (
         <div className="work-tools">
           {step.tools.map((t, i) => (
@@ -231,6 +268,11 @@ function Step({ step }) {
       ) : null}
     </div>
   );
+}
+
+function abbr(type) {
+  const map = { episodic: 'ep', semantic: 'sem', relationship: 'rel', temporal: 'tmp', procedural: 'proc', working: 'wrk' };
+  return map[type] ?? type;
 }
 
 // Convert the live SSE snapshot into the same shape getTask() returns.

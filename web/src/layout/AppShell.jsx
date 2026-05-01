@@ -13,15 +13,17 @@ import { WorkPane } from '../components/WorkPane.jsx';
 import { FineTunePane } from '../components/FineTunePane.jsx';
 import { ToastStack } from '../components/ToastStack.jsx';
 import { useSnapshotToasts } from '../hooks/useSnapshotToasts.js';
+import { useMemoryToasts } from '../hooks/useMemoryStream.js';
 
 export function AppShell() {
   const [params] = useSearchParams();
   const showTask = params.get('task');
   const showFineTune = params.get('finetune');
 
-  // Subscribe globally so any snapshot/write event fires a toast regardless
+  // Subscribe globally so any snapshot/memory event fires a toast regardless
   // of which page the user is on.
   useSnapshotToasts();
+  useMemoryToasts();
 
   return (
     <div className="app">

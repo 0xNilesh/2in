@@ -67,16 +67,32 @@ export const storageApi = {
 };
 
 export const memoryApi = {
+  // Per-type list. Type can be a new memory type or a legacy slice alias.
   list: (slice, twin = '42') =>
     fetch(url(`/api/memory/${slice}/list?twin=${encodeURIComponent(twin)}`)).then(unwrap),
+  // Top-level summary across all 6 typed slices.
+  listAll: (twin = '42') =>
+    fetch(url(`/api/memory/list?twin=${encodeURIComponent(twin)}`)).then(unwrap),
   write: (slice, value, twin = '42', who) =>
     fetch(url(`/api/memory/${slice}/write`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ twin, value, who }),
     }).then(unwrap),
+  // LLM-driven extraction; returns the typed entries it stored.
+  encode: (text, twin = '42', source = 'manual', agent) =>
+    fetch(url('/api/memory/encode'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ twin, text, source, agent }),
+    }).then(unwrap),
+  forget: (slice, id, twin = '42') =>
+    fetch(url(`/api/memory/${slice}/${encodeURIComponent(id)}?twin=${encodeURIComponent(twin)}`), {
+      method: 'DELETE',
+    }).then(unwrap),
   root: (slice, twin = '42') =>
     fetch(url(`/api/memory/${slice}/root?twin=${encodeURIComponent(twin)}`)).then(unwrap),
+  exportUrl: (twin = '42') => url(`/api/memory/export?twin=${encodeURIComponent(twin)}`),
 };
 
 export const personaApi = {

@@ -49,6 +49,24 @@ export function useTaskStream(taskId) {
         };
       });
     });
+    ch.onEvent('step.memory.read', (ev) => {
+      setState((s) => {
+        const step = s.steps[ev.idx] ?? { idx: ev.idx, status: 'live', output: '', tools: [] };
+        return {
+          ...s,
+          steps: { ...s.steps, [ev.idx]: { ...step, memRead: { types: ev.types, count: ev.count } } },
+        };
+      });
+    });
+    ch.onEvent('step.memory.write', (ev) => {
+      setState((s) => {
+        const step = s.steps[ev.idx] ?? { idx: ev.idx, status: 'live', output: '', tools: [] };
+        return {
+          ...s,
+          steps: { ...s.steps, [ev.idx]: { ...step, memWrite: { types: ev.types, count: ev.count } } },
+        };
+      });
+    });
     ch.onEvent('step.token', (ev) => {
       setState((s) => {
         const step = s.steps[ev.idx];

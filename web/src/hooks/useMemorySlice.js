@@ -83,5 +83,5 @@ export function useMemorySlice(sliceId, { twin = '42' } = {}) {
     setEntries((curr) => curr.filter((e) => e.ts !== ts));
   }, [sliceId]);
 
-  return { entries, root, add, remove, loading, error, source };
+  return { entries, root, add, remove, loading, error, source, reload: load };
 }
