@@ -15,6 +15,7 @@ import { memoryRoutes } from './routes/memory.js';
 import { personaRoutes } from './routes/persona.js';
 import { chainRoutes } from './routes/chain.js';
 import { finetuneRoutes } from './routes/finetune.js';
+import { toolsRoutes } from './routes/tools.js';
 
 export async function buildServer(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -51,6 +52,7 @@ export async function buildServer(): Promise<FastifyInstance> {
       await api.register(personaRoutes);
       await api.register(chainRoutes);
       await api.register(finetuneRoutes);
+      await api.register(toolsRoutes);
     },
     { prefix: '/api' },
   );
