@@ -1,24 +1,23 @@
-// Pattern orchestrator. Reads a JSON pattern definition (Scout → Quill →
-// Mantle → ...), invokes each step's agent via the compute service, streams
-// tokens to the bus, and chains step outputs as context for the next step.
+// Pattern orchestrator. Reads a pattern definition (Scout → Quill → Mantle
+// → ...), invokes each step's agent via the compute service, runs each
+// declared tool through the registry, streams everything to the bus, and
+// chains step outputs as context for the next step.
 //
 // Pattern shape:
-//   { id, title, steps: [{ idx, agent, label, toolHints? }] }
-//
-// Tools are not really invoked here yet — we surface "tool.call" events with
-// plausible names per agent so the WorkPane shows tool composition. Real
-// tool execution lands in Phase 2 alongside Storage.
+//   { id, title, steps: [{ idx, agent, label, tools? }] }
+//   tools = [{ name, args: object }]   args validated by the tool's zod schema
 
 import { compute, type ChatMessage } from './compute.js';
 import { systemPrompt, type AgentRole, type PromptContext } from './prompts.js';
 import { emit, openBus } from './bus.js';
+import { registry } from './tools/index.js';
 import crypto from 'node:crypto';
 
 export interface PatternStep {
   idx: number;
   agent: AgentRole;
   label: string;
-  tools?: Array<{ name: string; args: string }>;
+  tools?: Array<{ name: string; args: Record<string, unknown> }>;
 }
 
 export interface Pattern {
@@ -32,27 +31,72 @@ export const PATTERNS: Record<string, Pattern> = {
     id: 'content-draft',
     title: 'content-draft',
     steps: [
-      { idx: 1, agent: 'scout', label: 'Pull recent themes',
-        tools: [{ name: 'search_memory', args: 'slice=performance' }] },
-      { idx: 2, agent: 'quill', label: 'Draft in your voice',
-        tools: [{ name: 'read_memory', args: 'slice=voice · k=15' }] },
-      { idx: 3, agent: 'mark', label: 'Final pass',
-        tools: [{ name: 'search_memory', args: 'slice=rejection' }] },
+      {
+        idx: 1, agent: 'scout', label: 'Pull recent themes',
+        tools: [{ name: 'search_memory', args: { slice: 'performance', query: 'recent' } }],
+      },
+      {
+        idx: 2, agent: 'quill', label: 'Draft in your voice',
+        tools: [{ name: 'read_memory', args: { slice: 'voice', limit: 15 } }],
+      },
+      {
+        idx: 3, agent: 'mark', label: 'Final pass',
+        tools: [{ name: 'search_memory', args: { slice: 'rejection', query: 'pattern' } }],
+      },
     ],
   },
   'with-legal-review': {
     id: 'with-legal-review',
     title: 'with-legal-review',
     steps: [
-      { idx: 1, agent: 'scout', label: 'Research the brand',
-        tools: [{ name: 'search_memory', args: 'slice=relationship' }] },
-      { idx: 2, agent: 'quill', label: 'Draft v1',
-        tools: [{ name: 'read_memory', args: 'slice=voice · k=15' }] },
-      { idx: 3, agent: 'mantle', label: 'Legal review',
-        tools: [{ name: 'read_memory', args: 'contracts/' }] },
+      {
+        idx: 1, agent: 'scout', label: 'Research the brand',
+        tools: [{ name: 'search_memory', args: { slice: 'relationship', query: 'brand' } }],
+      },
+      {
+        idx: 2, agent: 'quill', label: 'Draft v1',
+        tools: [{ name: 'read_memory', args: { slice: 'voice', limit: 15 } }],
+      },
+      {
+        idx: 3, agent: 'mantle', label: 'Legal review',
+        tools: [{ name: 'read_memory', args: { slice: 'preference' } }],
+      },
       { idx: 4, agent: 'quill', label: 'Revise on Mantle\'s notes' },
-      { idx: 5, agent: 'mark', label: 'Final pass',
-        tools: [{ name: 'search_memory', args: 'slice=rejection' }] },
+      {
+        idx: 5, agent: 'mark', label: 'Final pass',
+        tools: [{ name: 'search_memory', args: { slice: 'rejection', query: 'pattern' } }],
+      },
+    ],
+  },
+  'clip-shorts': {
+    id: 'clip-shorts',
+    title: 'clip-shorts',
+    steps: [
+      {
+        idx: 1, agent: 'scout', label: 'Locate source episode',
+        tools: [{ name: 'read_memory', args: { slice: 'relationship', limit: 5 } }],
+      },
+      {
+        idx: 2, agent: 'cadence', label: 'Transcribe audio',
+        tools: [{ name: 'transcribe', args: { audioUrl: 'https://example.com/podcast/ep48.mp3' } }],
+      },
+      {
+        idx: 3, agent: 'cadence', label: 'Pick high-leverage clips',
+        tools: [{
+          name: 'find_clips',
+          args: {
+            transcript: 'I want to talk about something I\'ve been getting wrong for a year. I thought I was burned out — turns out, I was bored. Here\'s what changed.',
+            n: 3,
+          },
+        }],
+      },
+      {
+        idx: 4, agent: 'mark', label: 'Stage shorts for review',
+        tools: [
+          { name: 'store', args: { content: 'clip-1.mp4 placeholder', contentType: 'text' } },
+          { name: 'draft_post', args: { platform: 'x', content: 'Three minutes of footage. New short ↓' } },
+        ],
+      },
     ],
   },
 };
@@ -61,6 +105,9 @@ export function pickPattern(userInput: string): Pattern {
   const lower = userInput.toLowerCase();
   if (/(sponsor|brand|acme|deal|paid|#ad|endorsement)/.test(lower)) {
     return PATTERNS['with-legal-review']!;
+  }
+  if (/(clip|short|reel|episode|podcast|trim|highlight)/.test(lower)) {
+    return PATTERNS['clip-shorts']!;
   }
   return PATTERNS['content-draft']!;
 }
@@ -112,19 +159,34 @@ async function runPattern({ taskId, pattern, input }: RunArgs): Promise<void> {
 
   const stepOutputs: Array<{ agent: AgentRole; output: string }> = [];
   const startedAt = Date.now();
+  // Memory tools are scoped per-twin. Pull twinId from context — fall back
+  // to the demo master ('42') when not provided.
+  const twinId = '42';
 
   for (const step of pattern.steps) {
     emit(taskId, { type: 'step.start', idx: step.idx, agent: step.agent, label: step.label });
 
-    // Surface tool calls (cosmetic for now — real wiring in Phase 2)
+    // Real tool invocation through the registry. On failure, surface the
+    // error in the bus and stop the task.
     for (const t of step.tools ?? []) {
-      emit(taskId, {
-        type: 'step.tool',
-        idx: step.idx,
-        name: t.name,
-        args: t.args,
-        result: mockToolResult(t.name),
-      });
+      try {
+        const out = await registry.execute(t.name, t.args, { twinId, taskId });
+        emit(taskId, {
+          type: 'step.tool',
+          idx: step.idx,
+          name: t.name,
+          args: t.args,
+          result: summarise(out.result),
+        });
+      } catch (err) {
+        emit(taskId, {
+          type: 'step.tool',
+          idx: step.idx,
+          name: t.name,
+          args: t.args,
+          result: `error: ${(err as Error).message}`,
+        });
+      }
     }
 
     const messages = buildMessages(step.agent, input, stepOutputs);
@@ -180,14 +242,18 @@ function buildMessages(
   return messages;
 }
 
-function mockToolResult(tool: string): string {
-  switch (tool) {
-    case 'search_memory':
-      return 'returned 12 relevant entries';
-    case 'read_memory':
-      return 'read 15 closest exemplars';
-    default:
-      return 'ok';
+// Truncate / pretty-print a tool result so the bus payload stays small.
+function summarise(value: unknown): unknown {
+  if (value == null) return value;
+  if (typeof value === 'string') return value.length > 240 ? value.slice(0, 240) + '…' : value;
+  if (typeof value !== 'object') return value;
+  // Object — keep keys, truncate long string values.
+  try {
+    const json = JSON.stringify(value);
+    if (json.length <= 600) return value;
+    return { ...value as object, _truncated: true, _length: json.length };
+  } catch {
+    return String(value);
   }
 }
 
@@ -197,6 +263,5 @@ function formatElapsed(ms: number): string {
 }
 
 function estimateCost(steps: number): string {
-  // Rough mock: ~0.02 0G per step
   return `${(steps * 0.02).toFixed(2)} 0G`;
 }

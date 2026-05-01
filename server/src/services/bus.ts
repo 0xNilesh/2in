@@ -15,7 +15,7 @@ export type BusEvent =
   | { type: 'meta'; task: { id: string; title: string; pattern: string; status: string; totalSteps: number } }
   | { type: 'step.start'; idx: number; agent: string; label: string }
   | { type: 'step.token'; idx: number; delta: string }
-  | { type: 'step.tool'; idx: number; name: string; args: string; result: string }
+  | { type: 'step.tool'; idx: number; name: string; args: unknown; result: unknown }
   | { type: 'step.done'; idx: number; output: string; elapsed: string }
   | { type: 'task.done'; id: string; status: string; finalOutput: string; cost: string }
   | { type: 'task.error'; id: string; message: string };
