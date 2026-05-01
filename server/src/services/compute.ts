@@ -191,19 +191,30 @@ export class ComputeService {
     opts: ChatStreamOptions,
   ): AsyncGenerator<ChatStreamYield, void, void> {
     const url = await inferenceUrl();
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.ZG_ROUTER_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: opts.model ?? config.DIRECTOR_MODEL,
-        messages,
-        temperature: opts.temperature ?? 0.7,
-        stream: true,
-      }),
+    const body = JSON.stringify({
+      model: opts.model ?? config.DIRECTOR_MODEL,
+      messages,
+      temperature: opts.temperature ?? 0.7,
+      stream: true,
     });
+    const headers = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${config.ZG_ROUTER_API_KEY}`,
+    };
+
+    // 429 backoff: provider caps at 10 req/min. On rate-limit, honor
+    // Retry-After (or default 7s) and retry once. Anything else, throw.
+    let res = await fetch(url, { method: 'POST', headers, body });
+    if (res.status === 429) {
+      const retryAfterHeader = res.headers.get('retry-after');
+      const waitMs = retryAfterHeader
+        ? Math.min(15_000, Math.max(1_000, Math.ceil(Number(retryAfterHeader) * 1000)))
+        : 7_000;
+      // eslint-disable-next-line no-console
+      console.warn(`[compute] 429 — backing off ${waitMs}ms then retrying once`);
+      await new Promise((r) => setTimeout(r, waitMs));
+      res = await fetch(url, { method: 'POST', headers, body });
+    }
     if (!res.ok || !res.body) {
       const text = await res.text().catch(() => '');
       throw new Error(`router ${res.status}: ${text.slice(0, 200)}`);

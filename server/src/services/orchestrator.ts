@@ -162,6 +162,11 @@ async function runPattern({ taskId, pattern, input }: RunArgs): Promise<void> {
   // Memory tools are scoped per-twin. Pull twinId from context — fall back
   // to the demo master ('42') when not provided.
   const twinId = '42';
+  // 0G provider caps at 10 req/min per API key. Pacing each LLM step at
+  // ~7s keeps a 5-step task under the cap with room for the user's chat
+  // turn that spawned it.
+  const STEP_PACE_MS = 7_000;
+  let lastLlmAt = 0;
 
   for (const step of pattern.steps) {
     emit(taskId, { type: 'step.start', idx: step.idx, agent: step.agent, label: step.label });
@@ -188,6 +193,16 @@ async function runPattern({ taskId, pattern, input }: RunArgs): Promise<void> {
         });
       }
     }
+
+    // Pace ourselves so back-to-back steps don't trip the provider's
+    // 10 req/min cap. Wait the remainder of STEP_PACE_MS since the
+    // previous LLM call (skip on the first step — no prior call).
+    if (lastLlmAt !== 0) {
+      const elapsed = Date.now() - lastLlmAt;
+      const wait = STEP_PACE_MS - elapsed;
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    }
+    lastLlmAt = Date.now();
 
     const messages = buildMessages(step.agent, input, stepOutputs);
     const stepStart = Date.now();
