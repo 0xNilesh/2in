@@ -44,15 +44,14 @@ export default function Landing() {
 
       <section className="hero">
         <div>
-          <div className="hero-eyebrow">memory-driven digital twin · on 0G</div>
+          <div className="hero-eyebrow">your digital twin · on-chain · forever</div>
           <h1 className="hero-title">
-            What you've <em>lived</em> + what you've been told = your AI.
+            A digital twin you <em>actually own</em>.
           </h1>
           <p className="hero-sub">
-            A memory core that grows over time. Six typed slices — episodic, semantic,
-            relationship, temporal, procedural, working — anchored on 0G Storage and
-            owned through your iNFT roster. Specialists read + write through it. Your
-            identity emerges from memory, not configuration.
+            Specialists trained on your voice. Memory that grows with every post,
+            every rejection, every shipped tweet. All anchored on 0G — your twin
+            outlives any vendor.
           </p>
           <div className="hero-actions">
             <button className="btn-cta" onClick={enter}>
