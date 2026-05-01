@@ -1,0 +1,180 @@
+// Per-specialist memory-write snapshotting.
+//
+// Every memory write that flows through `recordWrite(specialistId, slice)`
+// is counted. When N writes accumulate within WINDOW_MS for a single
+// specialist, a snapshot fires:
+//
+//   1. Compute a fresh root hash from the union of (specialistId, all writes,
+//      ts) — deterministic for the snapshot history.
+//   2. Append a SnapshotRecord to the in-memory log keyed by tokenId.
+//   3. Emit 'snapshot.created' on the snapshot bus so SSE listeners see it.
+//   4. Real chain write — issue a `updateMetadata(tokenId, newRoot)` via
+//      the orchestrator delegate wallet WHEN ONE IS CONFIGURED. For now
+//      we emit a deterministic mock txHash; wiring the actual delegate
+//      signer is Phase 6.5 work.
+//
+// Snapshot history is kept per tokenId; the GET endpoint returns seed
+// rows + live ones for nice continuity in the UI.
+
+import crypto from 'node:crypto';
+import { createBus } from '../lib/event-bus.js';
+
+export interface SnapshotRecord {
+  idx: number;
+  tokenId: number;
+  specialistId: string;
+  fromHash: string;
+  toHash: string;
+  delta: string;
+  triggeredBy: 'manual' | 'tool' | 'feedback' | 'chat';
+  ts: number;
+  txHash: string;
+  source: 'mock' | 'chain';
+}
+
+export interface WriteRecord {
+  specialistId: string;
+  slice: string;
+  ts: number;
+  triggeredBy: SnapshotRecord['triggeredBy'];
+}
+
+export type SnapshotEvent =
+  | { type: 'snapshot.created'; snapshot: SnapshotRecord }
+  | { type: 'write.recorded'; write: WriteRecord; pending: number };
+
+const WINDOW_MS = 24 * 60 * 60 * 1000;
+const THRESHOLD = 3;
+
+// specialistId → tokenId mapping. Seeded with the demo roster from
+// web/src/data/specialists.js — keep in sync.
+const TOKEN_OF: Record<string, number> = {
+  director: 42,
+  quill: 43,
+  cadence: 44,
+  mantle: 45,
+  mark: 46,
+  scout: 47,
+};
+
+const writeCounters = new Map<string, WriteRecord[]>(); // specialistId → recent writes
+const snapshotsByToken = new Map<number, SnapshotRecord[]>(); // tokenId → history (newest-first)
+let snapshotIdx = 12; // continues the seed history idx so the UI flows
+
+const snapshotBus = createBus<SnapshotEvent>({
+  // 'all' is the only key — broadcasts to anyone listening for snapshots.
+  terminalTypes: [],
+});
+
+// Seed snapshot history (matches the static rows the UI used to show).
+function seedHistory(tokenId: number): SnapshotRecord[] {
+  const base = snapshotsByToken.get(tokenId);
+  if (base) return base;
+  const seed: SnapshotRecord[] = [
+    {
+      idx: 12, tokenId, specialistId: tokenIdToSpecialist(tokenId),
+      fromHash: '0x88b1…0042', toHash: '0x88c0…d013',
+      delta: 'rejection_memory +3 entries',
+      triggeredBy: 'feedback', ts: Date.now() - 14 * 60 * 1000,
+      txHash: '0xseed01', source: 'mock',
+    },
+    {
+      idx: 11, tokenId, specialistId: tokenIdToSpecialist(tokenId),
+      fromHash: '0x4a02…ffaa', toHash: '0x88b1…0042',
+      delta: 'preference_memory override',
+      triggeredBy: 'manual', ts: Date.now() - 2 * 86_400_000,
+      txHash: '0xseed02', source: 'mock',
+    },
+    {
+      idx: 10, tokenId, specialistId: tokenIdToSpecialist(tokenId),
+      fromHash: '0x2cc0…1199', toHash: '0x4a02…ffaa',
+      delta: 'voice_memory +24 examples',
+      triggeredBy: 'tool', ts: Date.now() - 6 * 86_400_000,
+      txHash: '0xseed03', source: 'mock',
+    },
+  ];
+  snapshotsByToken.set(tokenId, seed);
+  return seed;
+}
+
+function tokenIdToSpecialist(tokenId: number): string {
+  return Object.entries(TOKEN_OF).find(([, t]) => t === tokenId)?.[0] ?? 'unknown';
+}
+
+export function recordWrite(input: {
+  specialistId: string;
+  slice: string;
+  triggeredBy: SnapshotRecord['triggeredBy'];
+}): { snapshot: SnapshotRecord | null; pending: number } {
+  const list = writeCounters.get(input.specialistId) ?? [];
+  const now = Date.now();
+  const recent = list.filter((w) => now - w.ts < WINDOW_MS);
+  recent.push({ ...input, ts: now });
+  writeCounters.set(input.specialistId, recent);
+
+  // Always emit the bare write so the toast surface fires immediately.
+  snapshotBus.emit('all', {
+    type: 'write.recorded',
+    write: { ...input, ts: now },
+    pending: recent.length,
+  });
+
+  if (recent.length < THRESHOLD) {
+    return { snapshot: null, pending: recent.length };
+  }
+
+  // Threshold crossed — fire snapshot, reset counter for this specialist.
+  writeCounters.set(input.specialistId, []);
+  const snapshot = createSnapshot(input.specialistId, recent);
+  snapshotBus.emit('all', { type: 'snapshot.created', snapshot });
+  return { snapshot, pending: 0 };
+}
+
+function createSnapshot(specialistId: string, recent: WriteRecord[]): SnapshotRecord {
+  const tokenId = TOKEN_OF[specialistId] ?? 0;
+  if (!tokenId) throw new Error(`unknown specialist: ${specialistId}`);
+  const history = seedHistory(tokenId);
+  const fromHash = history[0]?.toHash ?? '0x0000…0000';
+  const seed = `${specialistId}:${recent.map((r) => `${r.slice}@${r.ts}`).join(',')}`;
+  const toHashFull = '0x' + crypto.createHash('sha256').update(seed).digest('hex');
+  const toHash = `${toHashFull.slice(0, 6)}…${toHashFull.slice(-4)}`;
+  const txHash = '0x' + crypto.createHash('sha256').update(`tx:${seed}`).digest('hex');
+
+  const idx = ++snapshotIdx;
+  const sliceCounts = recent.reduce<Record<string, number>>((acc, w) => {
+    acc[w.slice] = (acc[w.slice] ?? 0) + 1;
+    return acc;
+  }, {});
+  const delta = Object.entries(sliceCounts)
+    .map(([s, n]) => `${s} +${n}`)
+    .join(' · ');
+
+  const snapshot: SnapshotRecord = {
+    idx,
+    tokenId,
+    specialistId,
+    fromHash,
+    toHash,
+    delta,
+    triggeredBy: recent.at(-1)?.triggeredBy ?? 'tool',
+    ts: Date.now(),
+    txHash,
+    source: 'mock', // real path waits for delegate signer wiring
+  };
+
+  history.unshift(snapshot);
+  return snapshot;
+}
+
+export function getSnapshots(tokenId: number): SnapshotRecord[] {
+  return seedHistory(tokenId).slice().sort((a, b) => b.ts - a.ts);
+}
+
+export function subscribe() {
+  return snapshotBus.subscribe('all');
+}
+
+// Open the bus eagerly so subscribe() always finds something.
+snapshotBus.open('all');
+
+export const snapshotConfig = { THRESHOLD, WINDOW_MS };
