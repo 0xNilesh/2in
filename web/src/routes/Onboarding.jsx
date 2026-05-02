@@ -53,8 +53,13 @@ export default function Onboarding() {
 
   const canContinue = (() => {
     if (state.step === 0) return auth.authenticated;
-    // step 1: either a social platform is connected OR the questionnaire was submitted
-    if (state.step === 1) return Boolean(state.twitter?.handle) || Boolean(state.questionnaire?.completed);
+    // step 1: either a social platform is connected OR the questionnaire was
+    // submitted. Block while persona extraction (twitter.analyzing) is still
+    // in flight — continuing mid-extraction would skip the seeding.
+    if (state.step === 1) {
+      if (state.twitter?.analyzing) return false;
+      return Boolean(state.twitter?.handle) || Boolean(state.questionnaire?.completed);
+    }
     if (state.step === 2) return Boolean(state.twinName.trim());
     return true;
   })();
