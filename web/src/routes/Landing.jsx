@@ -101,7 +101,9 @@ export default function Landing() {
           <div className="hero-line v l3"></div>
           <div className="hero-line h l4"></div>
 
-          <div className="hero-twin">2<em>in</em></div>
+          <div className="hero-twin">
+            <img src="/brand/logo-knockout.svg" alt="2in" width="92" height="92" style={{ display: 'block' }} />
+          </div>
           <div className="hero-spec s1">W<span className="role-mini">Writer</span></div>
           <div className="hero-spec s2">R<span className="role-mini">Researcher</span></div>
           <div className="hero-spec s3">E<span className="role-mini">Editor</span></div>

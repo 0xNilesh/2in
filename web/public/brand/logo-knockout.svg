@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="2in knockout logomark">
+  <title>2in — knockout (for use on peach / warm backgrounds)</title>
+  <!-- Same geometry as /brand/logo.svg, but recoloured for warm-bg surfaces:
+       dark "2" + mint italic "in" for high contrast on the hero disc, light
+       previews, etc. -->
+  <path d="M 50 90
+           Q 50 30, 128 30
+           Q 206 30, 206 92
+           Q 206 130, 162 162
+           L 60 222
+           L 215 222"
+        fill="none" stroke="#1a0a04" stroke-width="26"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="135" y="118"
+        font-family="Geist, ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, sans-serif"
+        font-weight="500" font-size="46" fill="#0b6f5d" font-style="italic"
+        text-anchor="middle" letter-spacing="-1">in</text>
+</svg>
