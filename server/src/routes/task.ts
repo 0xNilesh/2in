@@ -21,6 +21,13 @@ const SpawnBody = z.object({
   goal: z.string().min(1),
   pattern: z.string().optional(),
   twin: TwinCtx,
+  // Last few chat turns from the originating thread, so specialists can
+  // resolve references like "shorter", "in 200 words", "match my voice".
+  // Cap enforced server-side; client can pass more, we'll trim.
+  chatHistory: z.array(z.object({
+    role: z.enum(['user', 'assistant']),
+    content: z.string().max(2000),
+  })).max(20).optional(),
 });
 
 export async function taskRoutes(app: FastifyInstance): Promise<void> {
@@ -34,9 +41,12 @@ export async function taskRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/task', async (req) => {
     const body = SpawnBody.parse(req.body);
+    // Trim history to the last 6 turns server-side as a guard.
+    const chatHistory = (body.chatHistory ?? []).slice(-6);
     return spawnTask({
       goal: body.goal,
       pattern: body.pattern,
+      chatHistory,
       context: {
         twinName: body.twin?.name ?? '2in',
         twitterHandle: body.twin?.twitterHandle ?? null,

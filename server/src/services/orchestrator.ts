@@ -349,6 +349,10 @@ export interface SpawnTaskInput {
   goal: string;
   pattern?: string;
   context: PromptContext;
+  /** Last few user+assistant turns from the originating chat thread.
+   *  Specialists see this as prior conversational context so references
+   *  like "shorter" or "in 200 words" resolve to the actual prior topic. */
+  chatHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
 }
 
 export interface SpawnTaskResult {
@@ -593,6 +597,21 @@ function buildMessages(
 ): ChatMessage[] {
   const sys = systemOverride ?? systemPrompt(agent, input.context);
   const messages: ChatMessage[] = [{ role: 'system', content: sys }];
+
+  // Conversational context — prior turns from the originating chat thread.
+  // Lets the specialist resolve references like "in 200 words", "shorter",
+  // "more contrarian" against the previous topic instead of hallucinating
+  // a fresh subject.
+  if (input.chatHistory && input.chatHistory.length > 0) {
+    const transcript = input.chatHistory
+      .map((m) => `${m.role === 'user' ? 'User' : 'Director'}: ${m.content}`)
+      .join('\n\n');
+    messages.push({
+      role: 'user',
+      content: `Recent chat with the user (for context — the goal below references this):\n\n${transcript}`,
+    });
+  }
+
   messages.push({ role: 'user', content: `Goal: ${input.goal}` });
 
   if (memoryCtx.length > 0) {

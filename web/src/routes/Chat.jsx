@@ -169,9 +169,17 @@ function ChatBody({ threadId, twin, seed, thread, onRename, onTouch, onNewChat, 
         const goalMsg = [...allMessages].reverse().find((m) => m.kind === 'user');
         const goal = (goalMsg?.text && (Array.isArray(goalMsg.text) ? goalMsg.text.join(' ') : goalMsg.text)) ?? 'unspecified';
 
+        // Send the last few user+director turns so specialists can resolve
+        // references like "in 200 words", "shorter", "more contrarian"
+        // against the prior topic. Cap at 6 turns.
+        const chatHistory = allMessages
+          .filter((m) => m.kind === 'user' || (m.kind === 'agent' && m.from === 'director'))
+          .slice(-6)
+          .map((m) => toApiMessage(m));
+
         // Normal pattern dispatch (no attachment in this turn).
         const explicitPattern = taskCue === '__auto__' ? undefined : taskCue;
-        const { taskId } = await taskApi.spawn(goal, twin, explicitPattern);
+        const { taskId } = await taskApi.spawn(goal, twin, explicitPattern, chatHistory);
         setExtension((ext) => [
           ...ext,
           {

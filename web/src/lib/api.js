@@ -48,11 +48,11 @@ export const chatApi = {
 
 export const taskApi = {
   patterns: () => fetch(url('/api/task/patterns')).then(unwrap),
-  spawn: (goal, twin, pattern) =>
+  spawn: (goal, twin, pattern, chatHistory) =>
     fetch(url('/api/task'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ goal, twin, pattern }),
+      body: JSON.stringify({ goal, twin, pattern, chatHistory }),
     }).then(unwrap),
 };
 
