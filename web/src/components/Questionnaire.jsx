@@ -460,7 +460,7 @@ function UserInput({ q, value, onChange, disabled }) {
           onChange={(e) => onChange(e.target.value)}
           placeholder={q.placeholder ?? ''}
           disabled={disabled}
-          style={{ marginLeft: 34, padding: '8px 10px', resize: 'vertical' }}
+          style={{ marginLeft: 34, maxWidth: 520, padding: '8px 10px', resize: 'vertical' }}
         />
       );
     case 'chips':
