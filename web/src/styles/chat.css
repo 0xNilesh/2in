@@ -169,6 +169,9 @@ blockquote.draft strong { font-weight: 600; }
   color: var(--text);
   font: inherit; font-size: 15px; line-height: 1.5;
   resize: none; min-height: 24px;
+  /* line-height 1.5 × 15px ≈ 22.5px per line; 4 lines ≈ 92px */
+  max-height: 110px;
+  overflow-y: auto;
 }
 .composer textarea::placeholder { color: var(--text-faint); }
 .composer-bar {

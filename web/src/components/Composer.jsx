@@ -6,7 +6,7 @@
 // Attach uploads each picked file to /api/upload and then renders a chip
 // strip above the textarea showing the upload(s); clicking ✕ removes one.
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { uploadApi } from '../lib/api.js';
 import { pushToast } from '../hooks/useToasts.js';
 
@@ -23,6 +23,17 @@ export function Composer({ placeholder = 'Message 2in', onSend, disabled = false
   const [attachments, setAttachments] = useState([]);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef(null);
+  const textareaRef = useRef(null);
+
+  // Auto-grow with the content. Reset to 'auto' first so shrinking works
+  // on backspace; max-height is enforced by CSS so this safely caps and
+  // overflow-y kicks in once we hit the lid.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, [text]);
 
   const submit = () => {
     const trimmed = text.trim();
@@ -109,6 +120,7 @@ export function Composer({ placeholder = 'Message 2in', onSend, disabled = false
           </div>
         ) : null}
         <textarea
+          ref={textareaRef}
           rows="1"
           placeholder={placeholder}
           value={text}
