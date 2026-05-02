@@ -9,7 +9,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { extractPersona, type RawTweet } from '../services/persona.js';
+import { extractPersona, fromQuestionnaire, type RawTweet, type QuestionnaireAnswers } from '../services/persona.js';
 import { storage } from '../services/storage.js';
 import crypto from 'node:crypto';
 
@@ -98,4 +98,34 @@ export async function personaRoutes(app: FastifyInstance): Promise<void> {
       },
     };
   });
+
+  // Questionnaire-driven persona seeding. ~10 structured answers + up to
+  // 5 idol names → typed memory entries (deterministic for answers, one
+  // Qwen call per non-whitelisted idol for trait extraction).
+  app.post('/persona/from-questionnaire', async (req) => {
+    const body = QuestionnaireBody.parse(req.body);
+    const result = await fromQuestionnaire(body.answers as QuestionnaireAnswers, {
+      twinId: body.twin?.tokenId ?? '42',
+    });
+    return result;
+  });
 }
+
+const QuestionnaireBody = z.object({
+  twin: z.object({
+    tokenId: z.string().optional(),
+    name: z.string().optional(),
+  }).optional(),
+  answers: z.object({
+    role: z.string().min(1).max(280),
+    audience: z.string().min(1).max(280),
+    themes: z.array(z.string().max(80)).max(12).default([]),
+    tone: z.array(z.string().max(40)).max(6).default([]),
+    avoid: z.array(z.string().max(60)).max(10).default([]),
+    cadence: z.enum(['daily', 'weekly', 'when-inspired']).default('weekly'),
+    goals: z.array(z.string().max(80)).max(8).default([]),
+    idols: z.array(z.string().max(60)).max(5).default([]),
+    samples: z.array(z.string().max(500)).max(3).default([]),
+    extra: z.string().max(500).optional(),
+  }),
+});

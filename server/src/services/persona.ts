@@ -16,6 +16,10 @@
 //   performance_memory ← engagement baselines
 
 import { compute, type ChatMessage } from './compute.js';
+import { store, type MemoryEntry, type MemoryType } from './memory.js';
+import { recordWrite } from './snapshot.js';
+import { getIdolTraits, type IdolPack } from './idols.js';
+import crypto from 'node:crypto';
 
 export interface RawTweet {
   id: string;
@@ -281,4 +285,123 @@ function derivePreferences(style: StyleStats, voice: VoiceProfile): string[] {
   if (style.questionRate > 30) out.push('consider opening with a question');
   for (const av of voice.avoidances.slice(0, 2)) out.push(`avoid ${av}`);
   return out;
+}
+
+// ===================================================================
+// Questionnaire path — alternative to Twitter ingestion.
+// User answers ~10 questions; we deterministically write each answer as
+// a typed memory entry. For each named idol, we extract voice traits via
+// a Qwen call (or whitelist) and write each trait as semantic memory
+// tagged with `meta: { from: '<idol>' }`. The Writer reads those traits
+// as style anchors during drafting.
+// ===================================================================
+
+export type Cadence = 'daily' | 'weekly' | 'when-inspired';
+
+export interface QuestionnaireAnswers {
+  role: string;
+  audience: string;
+  themes: string[];
+  tone: string[];
+  avoid: string[];
+  cadence: Cadence;
+  goals: string[];
+  idols: string[];
+  samples: string[];
+  extra?: string;
+}
+
+export interface QuestionnaireResult {
+  seeded: Record<MemoryType, number>;
+  idolPacks: Array<{ name: string; source: IdolPack['source']; count: number }>;
+  twinId: string;
+}
+
+export async function fromQuestionnaire(
+  answers: QuestionnaireAnswers,
+  ctx: { twinId?: string } = {},
+): Promise<QuestionnaireResult> {
+  const twinId = ctx.twinId ?? '42';
+  const seeded: Record<MemoryType, number> = {
+    episodic: 0, semantic: 0, relationship: 0, temporal: 0, procedural: 0, working: 0,
+  };
+
+  // Helper that writes ONE entry + ticks the snapshot counter.
+  const write = async (type: MemoryType, text: string, source: string, meta?: Record<string, unknown>): Promise<void> => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const entry: MemoryEntry = {
+      id: crypto.randomBytes(6).toString('hex'),
+      type,
+      text: trimmed.slice(0, 280),
+      source,
+      ts: Date.now(),
+      reinforcement: 1,
+      stable: false,
+      meta,
+    };
+    await store(entry, twinId);
+    seeded[type] += 1;
+    try {
+      recordWrite({ specialistId: source, slice: type, triggeredBy: 'manual' });
+    } catch {
+      // unknown specialist for snapshot bookkeeping — ignore
+    }
+  };
+
+  // 1. Role → semantic
+  if (answers.role) await write('semantic', answers.role, 'companion');
+  // 2. Audience → relationship
+  if (answers.audience) await write('relationship', `audience: ${answers.audience}`, 'companion');
+  // 3. Themes → semantic
+  for (const t of answers.themes ?? []) {
+    if (t) await write('semantic', `posts about ${t}`, 'companion');
+  }
+  // 4. Tone → semantic
+  for (const t of answers.tone ?? []) {
+    if (t) await write('semantic', `tone: ${t}`, 'companion');
+  }
+  // 5. Avoidances → procedural
+  for (const a of answers.avoid ?? []) {
+    if (a) await write('procedural', `avoid ${a}`, 'editor');
+  }
+  // 6. Cadence → temporal
+  if (answers.cadence) {
+    const cadenceText = answers.cadence === 'daily' ? 'posts daily'
+      : answers.cadence === 'weekly' ? 'posts weekly'
+      : 'posts when inspired (irregular cadence)';
+    await write('temporal', cadenceText, 'strategist');
+  }
+  // 7. Goals → semantic
+  for (const g of answers.goals ?? []) {
+    if (g) await write('semantic', `goal: ${g}`, 'strategist');
+  }
+  // 8. Sample writing → semantic with kind=voice-sample
+  for (const s of (answers.samples ?? []).filter(Boolean)) {
+    await write('semantic', s, 'companion', { kind: 'voice-sample' });
+  }
+  // 9. Free text extra → semantic with kind=note
+  if (answers.extra) {
+    await write('semantic', answers.extra, 'companion', { kind: 'note' });
+  }
+
+  // 10. Idol traits — one Qwen call per idol (or whitelist hit), each
+  //     trait written as semantic with meta.from = idol name.
+  const idolPacks: QuestionnaireResult['idolPacks'] = [];
+  const idols = (answers.idols ?? []).filter(Boolean).slice(0, 5);
+  for (const idol of idols) {
+    try {
+      const pack = await getIdolTraits(idol);
+      for (const trait of pack.traits) {
+        await write('semantic', trait, idol.toLowerCase().replace(/\s+/g, '-'), { from: pack.name, src: pack.source });
+      }
+      idolPacks.push({ name: pack.name, source: pack.source, count: pack.traits.length });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(`[persona.fromQuestionnaire] idol "${idol}" failed: ${(err as Error).message}`);
+      idolPacks.push({ name: idol, source: 'mock', count: 0 });
+    }
+  }
+
+  return { seeded, idolPacks, twinId };
 }
