@@ -152,33 +152,42 @@ async function realWrite({ signer, functionName, args, extractTokenId }) {
   };
 }
 
-// Poll for a receipt with manual retries. Galileo's RPC frequently returns
-// transient receipt-not-found errors for several seconds (sometimes minutes)
-// AFTER a tx is actually mined. We swallow the known transient errors, then
-// RETURN NULL on persistent timeout instead of throwing — the tx is already
-// broadcast (writeContract returned a hash), so a missing receipt is not a
-// mint failure, it's just a chain-indexer race.
+// Poll for a receipt with manual retries.
+//
+// PHILOSOPHY: by the time we're here, signer.writeContract has already
+// returned a hash, meaning the tx was accepted by the RPC. So ANY error
+// from getTransactionReceipt is a "receipt isn't ready yet" condition,
+// NOT a mint failure. We swallow everything except a tiny allowlist of
+// truly-fatal errors (network unreachable, auth) and return null on
+// persistent timeout.
 async function pollReceipt(client, txHash, { maxMs = 120_000, intervalMs = 2_500 } = {}) {
   const deadline = Date.now() + maxMs;
+  let attempt = 0;
   while (Date.now() < deadline) {
+    attempt += 1;
     try {
       const r = await client.getTransactionReceipt({ hash: txHash });
       if (r) return r;
     } catch (err) {
       const msg = String(err?.message ?? '').toLowerCase();
-      // Treat ALL "receipt not yet available" shapes as transient — the
-      // tx IS broadcast at this point, so any not-found from the RPC is
-      // just indexer lag. Only re-throw on truly structural failures
-      // (network down, bad URL, etc.) which surface as 'fetch' errors.
-      const transient =
-        msg.includes('no matching receipts') ||
-        msg.includes('not found') ||
-        msg.includes('could not be found') ||
-        msg.includes('not be processed') ||
-        msg.includes('invalid parameters') ||
-        msg.includes('data corruption') ||
-        msg.includes('transactionreceiptnotfound');
-      if (!transient) throw err;
+      const name = String(err?.name ?? '').toLowerCase();
+      // Hard-fail allowlist — only abort polling for these. Everything
+      // else (including ANY 'not found', 'could not be found',
+      // 'TransactionReceiptNotFoundError', RPC quirks, parsing errors)
+      // is treated as transient.
+      const fatal =
+        msg.includes('failed to fetch') ||
+        msg.includes('networkerror') ||
+        msg.includes('cors') ||
+        msg.includes('unauthorized') ||
+        msg.includes('forbidden') ||
+        name === 'aborterror';
+      if (fatal) throw err;
+      // Otherwise swallow + log first attempt for visibility.
+      if (attempt === 1) {
+        // eslint-disable-next-line no-console
+        console.info(`[chain] receipt for ${txHash} not indexed yet (${err?.name ?? 'err'}) — polling`);
+      }
     }
     await new Promise((r) => setTimeout(r, intervalMs));
   }
