@@ -13,12 +13,15 @@ import {
   trimVideo, reframeVideo, letterboxReframe, burnCaption, audioEnhance,
   sceneCuts, extractGif, thumbnailAt, concatVideos, compressVideo,
   resizeImage, cropImage, convertImage, watermarkImage,
-  probeMeta, fileSize,
+  probeMeta, fileSize, applyImageFilter,
   type Aspect,
 } from '../media.js';
 import { resolveToLocal, makeOutputPath } from '../../routes/upload.js';
 import { compute } from '../compute.js';
 import { config } from '../../config.js';
+import { resolveProviderUrl } from '../provider-lookup.js';
+import { readFile, writeFile } from 'node:fs/promises';
+import { extname } from 'node:path';
 import { ToolError, type Tool, type ToolContext } from './types.js';
 
 const ASPECTS = ['9:16', '1:1', '16:9'] as const;
@@ -382,76 +385,216 @@ export const imageWatermark: Tool = {
 
 // ====================== LLM-DRIVEN ======================
 
-/** Image edit planning via 0G Qwen — uses the same Router/Advanced endpoint
- *  as the rest of compute (no broker SDK; that path reverts on Galileo).
+/** Image edit via Qwen-as-translator + ffmpeg. The 0G text Qwen can't see
+ *  pixels, but it CAN translate an English instruction ("make it warmer",
+ *  "color the lizard black") into a global ffmpeg filter expression. We
+ *  validate the expression against an allowlist + execute it. Result: a
+ *  real pixel-edited image, not just a description.
  *
- *  Tries a multimodal payload first (Qwen-VL shape: `content: [{type:'text'},
- *  {type:'image_url'}]`). If the configured provider is text-only (current
- *  default Qwen-2.5-7B-Instruct), the call typically still returns a useful
- *  plan because the model treats the URL as referenced context. If the
- *  multimodal call fails outright we fall back to a text-only request that
- *  describes the edit in prose.
+ *  Limits: filters are GLOBAL (no semantic masking). "Color the lizard
+ *  black" applies a desaturate+darken to the whole frame, which still
+ *  reads as a black lizard against the original background most of the
+ *  time. Object-aware edits need a true VL+inpaint model; will swap when
+ *  0G ships one.
+ */
+const FILTER_TRANSLATOR_SYSTEM = `You are an image-edit compiler. Convert the user's edit instruction into ONE ffmpeg video filter expression. Reply with ONLY the filter string — no prose, no markdown, no quotes.
+
+Available filters and their parameters:
+  eq=brightness=N:saturation=N:contrast=N:gamma=N
+    brightness -1..1 (negative=darker), saturation 0..3, contrast 0..2, gamma 0.1..10
+  hue=h=N:s=N:b=N
+    h -180..180 degrees, s 0..3 saturation multiplier, b -10..10 brightness shift
+  colorbalance=rs=N:gs=N:bs=N:rm=N:gm=N:bm=N:rh=N:gh=N:bh=N
+    each in -1..1 (rs=red shadows, rm=red midtones, rh=red highlights, etc.)
+  colorize=hue=N:saturation=N (h 0..360, s 0..1)
+  gblur=sigma=N (1..30, gaussian blur)
+  boxblur=N (1..20)
+  unsharp=la=N:ca=N (-2..2, sharpen/soften)
+  vignette                       (dark edges)
+  negate                          (invert colors — for "make it negative")
+  noise=alls=N:allf=t (N: 1..50 grain amount)
+  edgedetect                      (cartoon outline effect)
+  pixelize=w=N:h=N (8..64, pixelation)
+  fade=t=in:st=0:d=1              (rarely useful for stills)
+
+Rules:
+1. Reply with just the filter string. No prose. No backticks.
+2. Combine multiple filters with comma: "eq=saturation=0.6,vignette"
+3. Use realistic values — extreme values look broken.
+4. For "make it black/dark" use eq=brightness=-0.5:saturation=0.2 not negate.
+5. For "color X black" where X is an object, just darken+desaturate the whole frame.
+6. For "remove background" you can't — return: gblur=sigma=10
+7. For sketch/cartoon use: edgedetect
+
+Examples:
+  "make it warmer"           → eq=saturation=1.15,colorbalance=rs=0.18:bs=-0.12
+  "make it black and white"  → hue=s=0
+  "color the lizard black"   → eq=brightness=-0.55:saturation=0:contrast=1.2
+  "vintage feel"             → eq=saturation=0.65:contrast=1.1,colorbalance=rs=0.15:bs=-0.18,vignette
+  "blur the background"      → gblur=sigma=8
+  "add film grain"           → noise=alls=18:allf=t
+  "neon look"                → eq=saturation=2:contrast=1.4:brightness=0.05,hue=h=20
+  "darker and moodier"       → eq=brightness=-0.18:saturation=0.85:contrast=1.25,vignette`;
+
+/** Resolve the dedicated image-edit endpoint. Returns null if not configured. */
+async function imageEditEndpoint(): Promise<string | null> {
+  if (!config.ZG_IMAGE_EDIT_API_KEY) return null;
+  if (config.ZG_IMAGE_EDIT_PROVIDER_URL) {
+    return `${config.ZG_IMAGE_EDIT_PROVIDER_URL.replace(/\/$/, '')}/v1/proxy/images/generations`;
+  }
+  if (config.ZG_IMAGE_EDIT_PROVIDER_ADDRESS) {
+    const base = await resolveProviderUrl(config.ZG_IMAGE_EDIT_PROVIDER_ADDRESS);
+    return `${base}/v1/proxy/images/generations`;
+  }
+  return null;
+}
+
+/** Encode a local image file as a data: URL — what the qwen-image-edit
+ *  payload typically expects when no fetchable URL is available. */
+async function fileToDataUrl(path: string): Promise<string> {
+  const buf = await readFile(path);
+  const ext = extname(path).slice(1).toLowerCase() || 'png';
+  const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
+    : ext === 'webp' ? 'image/webp'
+    : ext === 'gif' ? 'image/gif'
+    : 'image/png';
+  return `data:${mime};base64,${buf.toString('base64')}`;
+}
+
+/** Image edit. Two backends, tried in order:
  *
- *  When 0G ships a true pixel-edit model the implementation here swaps
- *  without changing the tool contract. */
+ *   1. Real 0G qwen-image-edit-2511 if ZG_IMAGE_EDIT_API_KEY + provider URL
+ *      (or address) are configured. Pixel-true edit, object-aware.
+ *   2. ffmpeg-filter via Qwen text translator. Real pixel output but the
+ *      filter is GLOBAL (no object masking). Useful for "make it warmer",
+ *      "make it black and white", "add vignette", etc.
+ */
 export const imageEdit: Tool = {
   name: 'image.edit',
-  description: 'Natural-language image edit plan via Qwen on 0G. Returns the described result + the concrete edits the model proposes.',
+  description: 'Edit an image with a natural-language instruction. Uses 0G qwen-image-edit-2511 when configured (pixel-true, object-aware), falls back to a Qwen-driven ffmpeg filter (global tone/color edits).',
   category: 'media',
   input: z.object({
     fileUrl: z.string().url(),
-    instruction: z.string().min(1).max(500).describe('e.g., "color the lizard black", "add soft warm lighting"'),
+    instruction: z.string().min(1).max(500).describe('e.g., "color the lizard black", "add soft warm lighting", "remove the background"'),
   }),
-  execute: async (input) => {
-    const sysPrompt = `You are an expert photo editor. Given an instruction and a referenced image, produce: (1) a one-paragraph description of the edited result, (2) a numbered list of concrete edits applied. Be specific and visual.`;
-    // Try multimodal first — works on Qwen-VL providers, ignored on text-only.
-    const multimodalBody = {
-      model: config.SPECIALIST_MODEL ?? config.DIRECTOR_MODEL,
-      messages: [
-        { role: 'system', content: sysPrompt },
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: `Instruction: ${input.instruction}` },
-            { type: 'image_url', image_url: { url: input.fileUrl } },
-          ],
-        },
-      ],
-      max_tokens: 500,
-      temperature: 0.4,
-    };
-    try {
-      const j = await compute.completionRaw(multimodalBody) as { choices?: Array<{ message?: { content?: string } }> };
-      const plan = j.choices?.[0]?.message?.content ?? '';
-      if (plan) return { plan, mode: 'multimodal', source: '0g-router' };
-    } catch (err) {
-      // Multimodal payload may have failed because the provider is text-only.
-      // Fall through to the text-described variant below.
-      // eslint-disable-next-line no-console
-      console.warn(`[image.edit] multimodal call failed (${(err as Error).message}) — falling back to text-only`);
+  execute: async (input, ctx) => {
+    // === Backend 1: real qwen-image-edit-2511 ============================
+    const endpoint = await imageEditEndpoint();
+    if (endpoint) {
+      const src = await resolveToLocal(input.fileUrl);
+      try {
+        // Try a few common payload shapes. The 0G docs example shows a
+        // bare /images/generations call, but the model is labelled "Image
+        // Editing" so we attempt to pass the source image too — the
+        // provider accepts whichever field its handler implements.
+        const dataUrl = await fileToDataUrl(src.path);
+        const baseBody = {
+          model: config.ZG_IMAGE_EDIT_MODEL,
+          prompt: input.instruction,
+          n: 1,
+          size: '1024x1024',
+          response_format: 'b64_json',
+        };
+        const variants = [
+          { ...baseBody, image: dataUrl },          // common openai-edit shape
+          { ...baseBody, image_url: dataUrl },      // alt naming
+          { ...baseBody, init_image: dataUrl },     // diffusers-style
+          baseBody,                                  // last resort: prompt only (re-render)
+        ];
+        let lastErr: string | null = null;
+        for (const body of variants) {
+          try {
+            const res = await fetch(endpoint, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${config.ZG_IMAGE_EDIT_API_KEY}`,
+              },
+              body: JSON.stringify(body),
+            });
+            if (!res.ok) {
+              const text = await res.text().catch(() => '');
+              lastErr = `${res.status} ${text.slice(0, 180)}`;
+              continue;
+            }
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const j = (await res.json()) as any;
+            const b64 = j?.data?.[0]?.b64_json;
+            const url = j?.data?.[0]?.url;
+            if (!b64 && !url) {
+              lastErr = `unexpected response shape: ${JSON.stringify(j).slice(0, 180)}`;
+              continue;
+            }
+            const out = makeOutputPath('.png');
+            if (b64) {
+              await writeFile(out.path, Buffer.from(b64, 'base64'));
+            } else {
+              const r2 = await fetch(url);
+              if (!r2.ok) throw new Error(`fetch generated image: ${r2.status}`);
+              await writeFile(out.path, Buffer.from(await r2.arrayBuffer()));
+            }
+            const size = await fileSize(out.path);
+            return {
+              outputUrl: publicUrl(out.filename, ctx),
+              filename: out.filename,
+              sizeBytes: size,
+              instruction: input.instruction,
+              backend: 'qwen-image-edit-2511',
+              shape: Object.keys(body).find((k) => k === 'image' || k === 'image_url' || k === 'init_image') ?? 'prompt-only',
+            };
+          } catch (err) {
+            lastErr = (err as Error).message;
+          }
+        }
+        // eslint-disable-next-line no-console
+        console.warn(`[image.edit] qwen-image-edit endpoint exhausted variants — last err: ${lastErr ?? 'unknown'} — falling back to ffmpeg`);
+      } finally {
+        await src.cleanup();
+      }
     }
 
-    // Text-only fallback — passes the URL as a quoted reference. The model
-    // can't *see* the image but typically still produces a sensible plan.
-    const textBody = {
-      model: config.SPECIALIST_MODEL ?? config.DIRECTOR_MODEL,
-      messages: [
-        { role: 'system', content: sysPrompt },
-        {
-          role: 'user',
-          content: `Instruction: ${input.instruction}\n\nThe image is referenced at: ${input.fileUrl}\n\nWithout seeing it, propose what the edit would do based on the instruction alone, and what the result would visually look like.`,
-        },
-      ],
-      max_tokens: 500,
-      temperature: 0.4,
-    };
+    // === Backend 2: ffmpeg-filter via Qwen translator ======================
+    let filter = '';
     try {
-      const j = await compute.completionRaw(textBody) as { choices?: Array<{ message?: { content?: string } }> };
-      const plan = j.choices?.[0]?.message?.content ?? '';
-      if (!plan) throw new Error('empty response from 0G');
-      return { plan, mode: 'text-only', source: '0g-router', note: 'Provider is text-only; plan based on instruction without seeing pixels.' };
+      const j = await compute.completionRaw({
+        model: config.SPECIALIST_MODEL ?? config.DIRECTOR_MODEL,
+        messages: [
+          { role: 'system', content: FILTER_TRANSLATOR_SYSTEM },
+          { role: 'user', content: input.instruction },
+        ],
+        max_tokens: 200,
+        temperature: 0.2,
+      }) as { choices?: Array<{ message?: { content?: string } }> };
+      filter = (j.choices?.[0]?.message?.content ?? '').trim();
+      filter = filter.replace(/^```\w*\s*|\s*```$/g, '').trim();
+      filter = filter.replace(/^filter[:=]\s*/i, '').trim();
+      filter = filter.replace(/^["'`]+|["'`]+$/g, '').trim();
+      filter = filter.split(/\n/)[0]!.trim();
     } catch (err) {
-      throw new ToolError(`image.edit failed: ${(err as Error).message}`);
+      throw new ToolError(`image.edit translator failed: ${(err as Error).message}`);
+    }
+    if (!filter) throw new ToolError('image.edit: empty filter from translator');
+
+    const src = await resolveToLocal(input.fileUrl);
+    const out = makeOutputPath('.jpg');
+    try {
+      await applyImageFilter(src.path, out.path, filter);
+      const size = await fileSize(out.path);
+      return {
+        outputUrl: publicUrl(out.filename, ctx),
+        filename: out.filename,
+        sizeBytes: size,
+        filter,
+        instruction: input.instruction,
+        backend: 'ffmpeg-filter',
+        note: endpoint
+          ? 'qwen-image-edit endpoint failed — fell back to global ffmpeg filter'
+          : 'qwen-image-edit not configured (set ZG_IMAGE_EDIT_API_KEY + ZG_IMAGE_EDIT_PROVIDER_URL/ADDRESS) — using ffmpeg filter',
+      };
+    } catch (err) {
+      throw new ToolError(`image.edit failed: ${(err as Error).message} (filter was: ${filter})`);
+    } finally {
+      await src.cleanup();
     }
   },
 };

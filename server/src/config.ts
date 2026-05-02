@@ -35,6 +35,19 @@ const Schema = z.object({
   ZG_PROVIDER_ADDRESS: z.string().regex(/^0x[a-fA-F0-9]{40}$/).optional(),
   ZG_ROUTER_API_KEY: z.string().optional(),
 
+  // Optional dedicated 0G image-edit provider (e.g. qwen/qwen-image-edit-2511).
+  // Each provider issues its own app-sk-* token bound to its URL + model;
+  // the chat token does NOT work here. Three forms accepted:
+  //   ZG_IMAGE_EDIT_PROVIDER_URL  (full https URL)
+  //   ZG_IMAGE_EDIT_PROVIDER_ADDRESS  (0x… resolved via inference contract)
+  //   ZG_IMAGE_EDIT_API_KEY  (Bearer token for the above)
+  //   ZG_IMAGE_EDIT_MODEL  (default qwen/qwen-image-edit-2511)
+  // If none set, image.edit falls back to ffmpeg-filter via Qwen translator.
+  ZG_IMAGE_EDIT_PROVIDER_URL: z.string().optional(),
+  ZG_IMAGE_EDIT_PROVIDER_ADDRESS: z.string().regex(/^0x[a-fA-F0-9]{40}$/).optional(),
+  ZG_IMAGE_EDIT_API_KEY: z.string().optional(),
+  ZG_IMAGE_EDIT_MODEL: z.string().default('qwen/qwen-image-edit-2511'),
+
   // Broker mode — wallet-signed per-call. Used only if ZG_ROUTER_API_KEY
   // isn't set. The 2.0.0 SDK has known setup issues; Router is preferred.
   BROKER_PRIVATE_KEY: z.string().optional(),

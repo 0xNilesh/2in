@@ -273,6 +273,45 @@ export async function convertImage(input: string, output: string): Promise<void>
   await ffmpeg(['-y', '-i', input, output]);
 }
 
+/** Apply an arbitrary (whitelisted) ffmpeg filter chain to an image.
+ *  Filter names are validated against ALLOWED_FILTERS; argument values are
+ *  validated against a permissive but safe regex. Anything else throws.
+ *  This is the engine behind image.edit — Qwen produces the filter
+ *  string, we execute it. */
+const ALLOWED_FILTERS = new Set([
+  'eq', 'hue', 'colorbalance', 'colorize', 'colorchannelmixer',
+  'gblur', 'unsharp', 'boxblur', 'vignette', 'negate', 'noise',
+  'curves', 'lutyuv', 'lut', 'fade', 'edgedetect', 'pixelize',
+]);
+// Allow filter args containing letters/digits/=, +, -, ., :, /, *, comma is the
+// inter-filter separator handled outside this regex.
+const ARG_SAFE = /^[A-Za-z0-9_=:.\-+/* ]*$/;
+
+export function validateFilterChain(chain: string): { ok: true; cleaned: string } | { ok: false; reason: string } {
+  // Strip outer whitespace + trailing semicolons.
+  const trimmed = chain.trim().replace(/^[`'"]+|[`'"]+$/g, '').replace(/[;,]+$/, '');
+  if (!trimmed) return { ok: false, reason: 'empty filter' };
+  // ffmpeg uses `,` for chain separator and `;` for filter graph branches.
+  // We allow both but require each segment matches `name` or `name=args`.
+  const segments = trimmed.split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+  if (segments.length === 0) return { ok: false, reason: 'no filters parsed' };
+  if (segments.length > 8) return { ok: false, reason: 'too many filters (max 8)' };
+  for (const seg of segments) {
+    const m = seg.match(/^([a-zA-Z][a-zA-Z0-9_]*)(?:=(.*))?$/);
+    if (!m) return { ok: false, reason: `bad segment "${seg}"` };
+    const [, name, args] = m;
+    if (!ALLOWED_FILTERS.has(name!)) return { ok: false, reason: `filter "${name}" not allowed` };
+    if (args && !ARG_SAFE.test(args)) return { ok: false, reason: `unsafe args in "${seg}"` };
+  }
+  return { ok: true, cleaned: segments.join(',') };
+}
+
+export async function applyImageFilter(input: string, output: string, filterChain: string): Promise<void> {
+  const v = validateFilterChain(filterChain);
+  if (!v.ok) throw new Error(`invalid filter chain: ${v.reason}`);
+  await ffmpeg(['-y', '-i', input, '-vf', v.cleaned, '-frames:v', '1', output]);
+}
+
 export async function watermarkImage(input: string, output: string, text: string, opts: { fontSize?: number; opacity?: number; position?: 'tl' | 'tr' | 'bl' | 'br' | 'center' } = {}): Promise<void> {
   const fontSize = opts.fontSize ?? 36;
   const opacity = opts.opacity ?? 0.55;

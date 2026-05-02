@@ -11,11 +11,14 @@ const INFERENCE_ABI = [
   'function getService(address provider) view returns (address provider, string serviceType, string url, uint256 inputPrice, uint256 outputPrice, uint256 updatedAt, string model, string verifiability)',
 ] as const;
 
-let cachedUrl: string | null = null;
-let cachedFor: string | null = null;
+// Per-address URL cache — multiple providers (chat + image-edit + ...) can
+// coexist without thrashing.
+const cache = new Map<string, string>();
 
 export async function resolveProviderUrl(providerAddress: string): Promise<string> {
-  if (cachedUrl && cachedFor === providerAddress.toLowerCase()) return cachedUrl;
+  const key = providerAddress.toLowerCase();
+  const hit = cache.get(key);
+  if (hit) return hit;
 
   const provider = new ethers.JsonRpcProvider(config.BROKER_RPC);
   const contract = new ethers.Contract(config.BROKER_INFERENCE_CA, INFERENCE_ABI, provider);
@@ -24,7 +27,7 @@ export async function resolveProviderUrl(providerAddress: string): Promise<strin
   const url: string = result.url ?? result[2];
   if (!url) throw new Error('inference contract returned empty URL for provider');
 
-  cachedUrl = url.replace(/\/$/, '');
-  cachedFor = providerAddress.toLowerCase();
-  return cachedUrl;
+  const cleaned = url.replace(/\/$/, '');
+  cache.set(key, cleaned);
+  return cleaned;
 }
