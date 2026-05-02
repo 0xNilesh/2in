@@ -67,9 +67,17 @@ export function useStreamingChat({ target = 'director' } = {}) {
 }
 
 // Returns either an explicit pattern id, the sentinel '__auto__' (server
-// picks via LLM router), or null (no dispatch).
+// picks via classifier), or null (no dispatch).
+//
+// Strategy: only pass an explicit pattern when EXACTLY one pattern name
+// appears in the director's reply. If 0 or 2+ are mentioned (e.g., the
+// director's prose hallucinated multiple), fall through to '__auto__' so
+// the server's Qwen classifier picks based on the USER'S goal text rather
+// than our regex scanning the director's potentially muddled prose.
 function detectPattern(text) {
   const patterns = [
+    'absorb',
+    'answer',
     'daily-post',
     'with-research',
     'weekly-plan',
@@ -80,11 +88,11 @@ function detectPattern(text) {
     'sponsor-reply',
     'clip-shorts',
   ];
-  for (const p of patterns) {
-    if (text.includes(p)) return p;
-  }
+  const found = patterns.filter((p) => text.includes(p));
+  if (found.length === 1) return found[0];
+  if (found.length > 1) return '__auto__';
   // Director didn't name a pattern but used a dispatch verb — let the
-  // server's LLM router decide. Common phrasings:
+  // server's classifier decide. Common phrasings:
   //   "Dispatching Writer..."        / "I'll dispatch..."
   //   "Routing content request..."   / "Routing through..."
   //   "Spawning a task..."           / "Kicking off..."
