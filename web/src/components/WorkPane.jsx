@@ -97,17 +97,31 @@ export function WorkPane() {
 function FeedbackFooter({ taskId, task, onClose }) {
   const [busy, setBusy] = useState(false);
   const [rejecting, setRejecting] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [reason, setReason] = useState('');
+  const [editText, setEditText] = useState('');
 
-  const lastSpecialist = task.steps?.[task.steps.length - 1]?.agent;
+  const lastStep = task.steps?.[task.steps.length - 1];
+  const lastSpecialist = lastStep?.agent;
+  // Final draft text: prefer task.finalOutput from task.done, fall back to
+  // the last step's output buffer.
+  const finalText = task.finalOutput ?? lastStep?.output ?? '';
 
-  const approve = async () => {
+  const approve = async (overrideText) => {
     setBusy(true);
     try {
-      const res = await feedbackApi.approve(taskId);
+      // Server already accepts an optional finalOutput override on
+      // /task/:id/approve — it preferentially uses that over the inferred
+      // text. So sending the user's edit just works.
+      const body = overrideText && overrideText !== finalText
+        ? { finalOutput: overrideText }
+        : {};
+      const res = await feedbackApi.approve(taskId, body);
       pushToast({
         kind: 'success',
-        title: `Approved · saved to ${res.specialistId}'s voice_memory`,
+        title: overrideText
+          ? `Edited + approved · saved to ${res.specialistId}'s voice_memory`
+          : `Approved · saved to ${res.specialistId}'s voice_memory`,
         body: res.snapshot
           ? `Snapshot fired · updateMetadata(#${res.snapshot.tokenId}) · ${res.snapshot.delta}`
           : `${res.pendingWrites}/3 writes until next snapshot`,
@@ -140,6 +154,55 @@ function FeedbackFooter({ taskId, task, onClose }) {
     }
   };
 
+  const startEditing = () => {
+    setEditText(finalText);
+    setEditing(true);
+  };
+
+  if (editing) {
+    const dirty = editText.trim() !== finalText.trim();
+    return (
+      <footer className="work-foot" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+        <div style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'Geist Mono, monospace' }}>
+          editing {lastSpecialist}'s output · save approves the edited version
+        </div>
+        <textarea
+          autoFocus
+          value={editText}
+          onChange={(e) => setEditText(e.target.value)}
+          rows={Math.min(12, Math.max(3, editText.split('\n').length + 1))}
+          style={{
+            padding: '10px 12px',
+            background: 'var(--bg)',
+            border: '1px solid var(--border-strong)',
+            borderRadius: 8,
+            color: 'var(--text)',
+            font: 'inherit', fontSize: 13, lineHeight: 1.5, outline: 0,
+            resize: 'vertical',
+            minHeight: 80,
+          }}
+        />
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>
+          <span style={{ fontSize: 11, color: dirty ? 'var(--peach)' : 'var(--text-faint)', marginRight: 'auto' }}>
+            {dirty ? '● edited' : 'unchanged'}
+          </span>
+          <button
+            className="btn"
+            onClick={() => { setEditing(false); setEditText(''); }}
+            disabled={busy}
+          >Cancel</button>
+          <button
+            className="btn btn-peach"
+            onClick={() => approve(editText)}
+            disabled={busy || !editText.trim()}
+          >
+            {busy ? 'saving…' : dirty ? 'Save + approve' : 'Approve as-is'}
+          </button>
+        </div>
+      </footer>
+    );
+  }
+
   if (rejecting) {
     return (
       <footer className="work-foot" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
@@ -171,8 +234,15 @@ function FeedbackFooter({ taskId, task, onClose }) {
   return (
     <footer className="work-foot">
       <button className="btn" onClick={() => setRejecting(true)} disabled={busy}>Reject</button>
-      <button className="btn" disabled>Edit</button>
-      <button className="btn btn-peach" onClick={approve} disabled={busy}>
+      <button
+        className="btn"
+        onClick={startEditing}
+        disabled={busy || !finalText}
+        title={finalText ? 'Edit then approve' : 'No output to edit yet'}
+      >
+        Edit
+      </button>
+      <button className="btn btn-peach" onClick={() => approve()} disabled={busy}>
         {busy ? 'saving…' : 'Approve'}
       </button>
     </footer>
