@@ -5,16 +5,13 @@
 import { useParams, Link } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader.jsx';
 import { Avatar } from '../components/Avatar.jsx';
-import { TokenChip, HashChip } from '../components/TokenChip.jsx';
+import { TokenChip } from '../components/TokenChip.jsx';
 import { StatusPill } from '../components/StatusPill.jsx';
 import { getSpecialist } from '../data/specialists.js';
 import { ROUTES } from '../lib/routes.js';
 import { gatewayUrl } from '../lib/format.js';
 import { useTwinNft } from '../hooks/useTwinNft.js';
-import { useSpecialistJobs } from '../hooks/useSpecialistJobs.js';
-import { useFineTuneJob } from '../hooks/useFineTuneJob.js';
 import { useSnapshotHistory } from '../hooks/useSnapshotHistory.js';
-import { finetuneApi } from '../lib/api.js';
 
 function relativeTime(ts) {
   const d = Date.now() - ts;
@@ -22,180 +19,6 @@ function relativeTime(ts) {
   if (d < 3_600_000) return `${Math.round(d / 60_000)}m ago`;
   if (d < 86_400_000) return `${Math.round(d / 3_600_000)}h ago`;
   return `${Math.round(d / 86_400_000)}d ago`;
-}
-
-function readTwitterCorpus() {
-  try {
-    return JSON.parse(window.localStorage.getItem('2in:corpus:twitter') ?? 'null');
-  } catch {
-    return null;
-  }
-}
-
-function TrainingSection({ specialist }) {
-  const { jobs, currentJob, refetch } = useSpecialistJobs(specialist.id);
-  const corpus = readTwitterCorpus();
-  const corpusSize = corpus?.tweets?.length ?? 0;
-  const liveJob = jobs.find((j) => j.status === 'live');
-  const adapter = liveJob?.adapterURI ?? specialist.adapterURI ?? null;
-  const canTrain = !currentJob && corpusSize > 0;
-  const startTrain = async () => {
-    try {
-      await finetuneApi.start(specialist.id, {
-        baseModel: 'Qwen2.5-0.5B-Instruct',
-        datasetUri: corpus?.rootHash ?? `0g://corpus/${specialist.id}`,
-      });
-      await refetch();
-    } catch (err) {
-      // eslint-disable-next-line no-alert
-      alert(err.message ?? 'training_start_failed');
-    }
-  };
-
-  return (
-    <section>
-      <div
-        className="label-mono"
-        style={{ marginBottom: 10, marginTop: 24, display: 'flex', alignItems: 'center', gap: 10 }}
-      >
-        <span>Training history · LoRA fine-tune</span>
-        {currentJob ? (
-          <StatusPill color={currentJob.status === 'training' ? 'peach' : 'amber'}>
-            {currentJob.status}
-          </StatusPill>
-        ) : adapter ? (
-          <StatusPill color="mint">live · adapter loaded</StatusPill>
-        ) : (
-          <StatusPill color="muted">no adapter</StatusPill>
-        )}
-      </div>
-
-      {currentJob ? <LiveTrainingCard jobId={currentJob.id} /> : null}
-
-      {!currentJob && !adapter ? (
-        <div className="card" style={{ padding: 16 }}>
-          <div className="card-row">
-            <div className="grow">
-              <div className="card-title">
-                Train {specialist.name} on {corpusSize > 0 ? corpusSize : 'your'} {corpusSize > 0 ? 'recent posts' : 'corpus'}
-              </div>
-              <div className="card-sub">
-                Spawns a fine-tune on Qwen2.5-0.5B-Instruct via 0G Compute. Cost: 0.5 0G, ~30 min.
-              </div>
-            </div>
-            <button className="btn btn-peach" onClick={startTrain} disabled={!canTrain}>
-              Train now →
-            </button>
-          </div>
-          {!canTrain ? (
-            <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--text-faint)' }}>
-              Connect a corpus from onboarding to enable training.
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      {jobs.length > 0 ? (
-        <div className="table-card" style={{ marginTop: 12 }}>
-          <div className="table-row head" style={{ '--cols': '1.4fr 110px 110px 1.6fr 110px' }}>
-            <span>job</span>
-            <span>status</span>
-            <span>progress</span>
-            <span>adapter</span>
-            <span>started</span>
-          </div>
-          {jobs.map((j) => (
-            <div key={j.id} className="table-row" style={{ '--cols': '1.4fr 110px 110px 1.6fr 110px' }}>
-              <span style={{ fontFamily: 'Geist Mono, monospace', fontSize: 11.5, color: 'var(--peach)' }}>
-                {j.id}
-              </span>
-              <span>
-                <StatusPill color={statusColor(j.status)}>{j.status}</StatusPill>
-              </span>
-              <span style={{ fontFamily: 'Geist Mono, monospace', fontSize: 11.5, color: 'var(--text-2)' }}>
-                {j.progress}%
-              </span>
-              <span style={{ fontFamily: 'Geist Mono, monospace', fontSize: 11, color: 'var(--text-2)' }}>
-                {j.adapterURI ? `${j.adapterURI.slice(0, 10)}…${j.adapterURI.slice(-6)}` : '—'}
-              </span>
-              <span style={{ fontFamily: 'Geist Mono, monospace', fontSize: 11, color: 'var(--text-faint)' }}>
-                {new Date(j.startedAt).toLocaleTimeString()}
-              </span>
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-function LiveTrainingCard({ jobId }) {
-  const job = useFineTuneJob(jobId);
-  return (
-    <div
-      className="card"
-      style={{
-        padding: 16,
-        borderColor: 'var(--peach)',
-        background: 'var(--peach-04)',
-      }}
-    >
-      <div className="card-row">
-        <div className="grow">
-          <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            Training in progress
-            <StatusPill color={statusColor(job.status)}>{job.status}</StatusPill>
-          </div>
-          <div className="card-sub" style={{ marginTop: 4, fontFamily: 'Geist Mono, monospace' }}>
-            {job.meta?.baseModel ?? 'Qwen2.5-0.5B-Instruct'}
-            {job.etaSeconds != null ? ` · ~${job.etaSeconds}s left` : ''}
-          </div>
-        </div>
-        <div style={{ fontSize: 24, fontWeight: 600, color: 'var(--peach)' }}>{job.progress}%</div>
-      </div>
-      <div
-        style={{
-          marginTop: 12,
-          height: 6,
-          borderRadius: 3,
-          background: 'var(--bg-soft-2)',
-          overflow: 'hidden',
-        }}
-      >
-        <div
-          style={{
-            height: '100%',
-            width: `${job.progress}%`,
-            background: 'linear-gradient(90deg, var(--peach-warm), var(--peach-press))',
-            transition: 'width 600ms ease',
-          }}
-        />
-      </div>
-      {job.error ? (
-        <div style={{ marginTop: 8, fontSize: 12, color: 'var(--red)' }}>error: {job.error}</div>
-      ) : null}
-      {job.adapterURI ? (
-        <div
-          style={{
-            marginTop: 8,
-            fontFamily: 'Geist Mono, monospace',
-            fontSize: 11,
-            color: 'var(--mint)',
-          }}
-        >
-          adapter delivered · {job.adapterURI.slice(0, 12)}…{job.adapterURI.slice(-8)}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function statusColor(status) {
-  if (status === 'training' || status === 'queued') return 'peach';
-  if (status === 'delivered') return 'amber';
-  if (status === 'live') return 'mint';
-  if (status === 'failed') return 'red';
-  return 'muted';
 }
 
 function shortHash(h, head = 8, tail = 6) {
@@ -257,14 +80,12 @@ export default function Specialist() {
                 <div className="card-title" style={{ fontSize: 18 }}>{s.fullName ?? s.name}</div>
                 <div className="card-sub">{s.trainedOn}</div>
                 <div className="card-meta" style={{ marginTop: 8 }}>
-                  <span>jobs · {s.jobs}</span>
                   <span>model · {s.model}</span>
-                  <span>status · {s.status}</span>
+                  {snapshots.length > 0 ? <span>snapshots · {snapshots.length}</span> : null}
                 </div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
                 <TokenChip value={s.tokenId} link />
-                {s.adapterURI ? <HashChip label="adapter" value={s.adapterURI} /> : <StatusPill color="muted">no adapter</StatusPill>}
               </div>
             </div>
           </section>
@@ -312,24 +133,22 @@ export default function Specialist() {
               </div>
               <div className="proof-row">
                 <div className="k">sealedKey holder</div>
-                <div className="v">{shortAddr(owner) || '@nilesh.eth · 0x4f12…c8b1'}</div>
+                <div className="v">{shortAddr(owner)}</div>
               </div>
               <div className="proof-row">
                 <div className="k">adapterURI</div>
-                <div className="v peach">{s.adapterURI ?? 'null · awaiting first train-specialist run'}</div>
+                <div className="v">{s.adapterURI ?? '— (memory-driven, no LoRA on 0G yet)'}</div>
               </div>
               <div className="proof-row">
                 <div className="k">delegate</div>
-                <div className="v">{shortAddr(delegate) || 'orchestrator · 0x91ab…2f7d'}</div>
+                <div className="v">{shortAddr(delegate)}</div>
               </div>
               <div className="proof-row">
                 <div className="k">authorizations</div>
-                <div className="v">{s.id === 'mantle' ? '0xACME…1f4b · 30d expiry · pattern: with-legal-review' : 'none'}</div>
+                <div className="v">none</div>
               </div>
             </div>
           </section>
-
-          {!isDirector ? <TrainingSection specialist={s} /> : null}
 
           <section>
             <div className="label-mono" style={{ marginBottom: 10 }}>Snapshot history · updateMetadata</div>
