@@ -88,8 +88,6 @@ function ChatBody({ threadId, twin, seed, thread, onRename, onTouch, onNewChat, 
   const scrollRef = useRef(null);
   const lastTaskCueRef = useRef(null);
   const pendingAttachmentsRef = useRef([]);
-  const nav = useNavigate();
-  const loc = useLocation();
   const [mode, setMode] = useState(null);
 
   useEffect(() => {
