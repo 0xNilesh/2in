@@ -552,7 +552,12 @@ async function runPattern({ taskId, initial, input }: RunArgs): Promise<void> {
     }
   }
 
-  const finalOutput = stepOutputs.at(-1)?.output ?? '';
+  // Compute the REAL deliverable. By default it's the last step's output.
+  // BUT: when Editor was the last step, its output is meant to be either
+  // "SHIP" (Writer's draft is the deliverable) or "EDIT: <revised draft>"
+  // (Editor's revision is the deliverable). We resolve that here so the
+  // chat / approve flow gets the actual draft, not Editor's verdict text.
+  const finalOutput = resolveFinalOutput(stepOutputs);
   const totalElapsed = formatElapsed(Date.now() - startedAt);
   emit(taskId, {
     type: 'task.done',
@@ -562,6 +567,31 @@ async function runPattern({ taskId, initial, input }: RunArgs): Promise<void> {
     cost: estimateCost(stepOutputs.length),
   });
   void totalElapsed;
+}
+
+function resolveFinalOutput(stepOutputs: Array<{ agent: AgentRole; output: string }>): string {
+  if (stepOutputs.length === 0) return '';
+  const last = stepOutputs[stepOutputs.length - 1]!;
+  if (last.agent !== 'editor') return last.output;
+
+  const verdict = last.output.trim();
+  // SHIP — Writer's draft is the deliverable.
+  if (/^ship\.?$/i.test(verdict.split(/\n/)[0]!.trim())) {
+    const writerStep = [...stepOutputs].reverse().find((s) => s.agent === 'writer');
+    if (writerStep) return writerStep.output;
+    // No writer step — fall through to last non-editor step.
+    const lastNonEditor = [...stepOutputs].reverse().find((s) => s.agent !== 'editor');
+    return lastNonEditor?.output ?? verdict;
+  }
+  // EDIT: <revised draft>
+  const editMatch = verdict.match(/^edit\s*:\s*([\s\S]+)$/i);
+  if (editMatch) return editMatch[1]!.trim();
+
+  // Editor went off-format (e.g. wrote critique prose). Last-resort: use
+  // Writer's draft since Editor's output isn't a usable deliverable.
+  const writerStep = [...stepOutputs].reverse().find((s) => s.agent === 'writer');
+  if (writerStep) return writerStep.output;
+  return verdict;
 }
 
 function buildMessages(

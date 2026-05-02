@@ -37,18 +37,38 @@ function streamId(twinId: string, slice: string): string {
 function specialistFromTask(taskId: string): { specialistId: string; finalOutput: string } | null {
   const taskBus = bus(taskId);
   if (!taskBus) return null;
-  // Pick the last step.done event before task.done; that step's agent owns
-  // the final output.
+  // Walk events to find:
+  //   - the last specialist that ran (whose iNFT gets the snapshot tick)
+  //   - the resolved final draft from task.done (orchestrator already
+  //     applied SHIP/EDIT resolution there, so prefer it)
+  //   - per-step outputs so we can fall back to Writer's draft if Editor
+  //     was last and verdict was SHIP
   let lastSpecialist: string | undefined;
+  let writerOutput = '';
+  let editorVerdict = '';
   let lastOutput = '';
   let finalOutput = '';
   for (const ev of taskBus.history) {
     if (ev.type === 'step.start') lastSpecialist = ev.agent;
-    if (ev.type === 'step.done') lastOutput = ev.output;
+    if (ev.type === 'step.done') {
+      lastOutput = ev.output;
+      // Capture Writer / Editor outputs separately so we can resolve below.
+      // (We can't read agent off step.done directly — match by tracking the
+      // most recent step.start agent instead.)
+      if (lastSpecialist === 'writer') writerOutput = ev.output;
+      if (lastSpecialist === 'editor') editorVerdict = ev.output;
+    }
     if (ev.type === 'task.done') finalOutput = ev.finalOutput || lastOutput;
   }
   if (!lastSpecialist) return null;
-  return { specialistId: lastSpecialist, finalOutput: finalOutput || lastOutput };
+  // For approval purposes, attribute the win to Writer when Editor said
+  // SHIP — Writer's draft is what's being saved, so the snapshot tick + the
+  // memory write should belong to Writer's iNFT.
+  let attribSpecialist = lastSpecialist;
+  if (lastSpecialist === 'editor' && /^ship\.?$/i.test(editorVerdict.trim().split(/\n/)[0] ?? '')) {
+    if (writerOutput) attribSpecialist = 'writer';
+  }
+  return { specialistId: attribSpecialist, finalOutput: finalOutput || lastOutput };
 }
 
 export async function feedbackRoutes(app: FastifyInstance): Promise<void> {
