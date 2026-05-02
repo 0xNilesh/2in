@@ -73,35 +73,16 @@ const snapshotBus = createBus<SnapshotEvent>({
   terminalTypes: [],
 });
 
-// Seed snapshot history (matches the static rows the UI used to show).
+// Per-token snapshot history. Empty until real snapshots fire (no fake
+// seed entries — the static demo rows used the legacy slice names
+// rejection_memory / preference_memory / voice_memory which were
+// retired in the typed-memory refactor).
 function seedHistory(tokenId: number): SnapshotRecord[] {
-  const base = snapshotsByToken.get(tokenId);
-  if (base) return base;
-  const seed: SnapshotRecord[] = [
-    {
-      idx: 12, tokenId, specialistId: tokenIdToSpecialist(tokenId),
-      fromHash: '0x88b1…0042', toHash: '0x88c0…d013',
-      delta: 'rejection_memory +3 entries',
-      triggeredBy: 'feedback', ts: Date.now() - 14 * 60 * 1000,
-      txHash: '0xseed01', source: 'mock',
-    },
-    {
-      idx: 11, tokenId, specialistId: tokenIdToSpecialist(tokenId),
-      fromHash: '0x4a02…ffaa', toHash: '0x88b1…0042',
-      delta: 'preference_memory override',
-      triggeredBy: 'manual', ts: Date.now() - 2 * 86_400_000,
-      txHash: '0xseed02', source: 'mock',
-    },
-    {
-      idx: 10, tokenId, specialistId: tokenIdToSpecialist(tokenId),
-      fromHash: '0x2cc0…1199', toHash: '0x4a02…ffaa',
-      delta: 'voice_memory +24 examples',
-      triggeredBy: 'tool', ts: Date.now() - 6 * 86_400_000,
-      txHash: '0xseed03', source: 'mock',
-    },
-  ];
-  snapshotsByToken.set(tokenId, seed);
-  return seed;
+  let bucket = snapshotsByToken.get(tokenId);
+  if (bucket) return bucket;
+  bucket = [];
+  snapshotsByToken.set(tokenId, bucket);
+  return bucket;
 }
 
 function tokenIdToSpecialist(tokenId: number): string {
