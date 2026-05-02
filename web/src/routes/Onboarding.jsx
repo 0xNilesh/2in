@@ -94,7 +94,7 @@ export default function Onboarding() {
             walletAddress={auth.address}
           />
         )}
-        {state.step === 4 && <Ready twinName={state.twinName} />}
+        {state.step === 4 && <Ready twinName={state.twinName} state={state} />}
 
         <div className="onboard-actions">
           {state.step > 0 && state.step < STEPS.length - 1 ? (
@@ -919,8 +919,25 @@ function Mint({ twinName, twitter, walletAddress }) {
   );
 }
 
-function Ready({ twinName }) {
+function Ready({ twinName, state }) {
   const name = twinName || '2in';
+  const q = state?.questionnaire?.result;
+  const hasTwitter = Boolean(state?.twitter?.handle);
+  const seededTotal = q ? Object.values(q.seeded ?? {}).reduce((a, b) => a + b, 0) : 0;
+  const idolPacks = q?.idolPacks ?? [];
+
+  // Suggest a first prompt that exercises the seeded memory.
+  const firstPrompt = (() => {
+    if (q) {
+      const idol = idolPacks[0]?.name;
+      return idol
+        ? `${name}, draft a tweet about something I posted last week — match my voice and channel ${idol} a little.`
+        : `${name}, draft a tweet using my voice and themes.`;
+    }
+    if (hasTwitter) return `${name}, draft a tweet about something I posted last week.`;
+    return `${name}, give me 3 tweet ideas in my voice.`;
+  })();
+
   return (
     <>
       <div className="onboard-eyebrow">step 5 of 5</div>
@@ -930,9 +947,45 @@ function Ready({ twinName }) {
         dispatches the right specialists, and reports back when it's done.
       </p>
 
+      {q ? (
+        <div
+          style={{
+            marginTop: 18,
+            padding: 14,
+            background: 'var(--bg)',
+            border: '1px solid var(--mint)',
+            borderRadius: 12,
+          }}
+        >
+          <div style={{ fontSize: 12, color: 'var(--mint)', fontFamily: 'Geist Mono, monospace', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+            persona seeded · {seededTotal} entries
+          </div>
+          <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {Object.entries(q.seeded ?? {}).map(([type, n]) => n > 0 ? (
+              <span
+                key={type}
+                style={{
+                  fontSize: 10.5,
+                  padding: '2px 8px',
+                  borderRadius: 999,
+                  border: '1px solid var(--border)',
+                  color: 'var(--text-2)',
+                  fontFamily: 'Geist Mono, monospace',
+                }}
+              >{type} · {n}</span>
+            ) : null)}
+          </div>
+          {idolPacks.length > 0 ? (
+            <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--text-mute)' }}>
+              voice anchors from: {idolPacks.map((p) => `${p.name} (${p.count})`).join(' · ')}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       <div
         style={{
-          marginTop: 22,
+          marginTop: 18,
           padding: 18,
           background: 'var(--peach-04)',
           border: '1px solid var(--peach)',
@@ -951,7 +1004,7 @@ function Ready({ twinName }) {
           your first task · suggested
         </div>
         <div style={{ marginTop: 8, fontSize: 14, color: 'var(--text)' }}>
-          "{name}, draft a tweet about something I posted last week."
+          "{firstPrompt}"
         </div>
       </div>
     </>
