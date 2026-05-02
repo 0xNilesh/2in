@@ -153,11 +153,17 @@ function ChatBody({ threadId, twin, seed, thread, onRename, onTouch, onNewChat, 
         const attachments = pendingAttachmentsRef.current ?? [];
         pendingAttachmentsRef.current = [];
 
-        // Check if director named a media tool we can invoke directly.
-        const toolName = detectMediaTool(taskCue, partial, attachments);
-        if (toolName && attachments.length > 0) {
-          await runMediaTool(toolName, attachments[0], goal, setExtension);
-          return;
+        // Attachment present? The user's intent drives the tool — not the
+        // director's prose. We check the USER message text + the attachment
+        // kind. If that matches a media tool, run it directly and skip the
+        // pattern dispatch (visual-post would generate a NEW image, not
+        // edit the attached one).
+        if (attachments.length > 0) {
+          const toolName = detectMediaToolFromIntent(goal, attachments);
+          if (toolName) {
+            await runMediaTool(toolName, attachments[0], goal, setExtension);
+            return;
+          }
         }
 
         // Else: normal pattern dispatch.
@@ -269,20 +275,9 @@ function ChatBody({ threadId, twin, seed, thread, onRename, onTouch, onNewChat, 
       <header className="chat-head">
         <Avatar initial={twin.name?.[0]?.toUpperCase() ?? '2'} variant="dir" size="md" />
         <div className="meta">
-          <div className="name">
-            {twin.name} <span style={{ color: 'var(--text-faint)' }}>·</span> {seed.title}
-          </div>
+          <div className="name">{twin.name} <span style={{ color: 'var(--text-faint)' }}>·</span> {seed.title}</div>
           <div className="sub">
-            <span style={{ color: isStreaming ? 'var(--peach)' : mode && mode.mode !== 'mock' ? 'var(--mint)' : 'var(--amber)' }}>●</span>{' '}
-            {isStreaming
-              ? 'thinking…'
-              : mode?.mode === 'router'
-                ? `${twin.status} · ${mode.model ?? twin.model} · 0G router · live`
-                : mode?.mode === 'advanced'
-                  ? `${twin.status} · ${mode.model ?? twin.model} · 0G advanced · live`
-                  : mode?.mode === 'broker'
-                    ? `${twin.status} · ${mode.model ?? twin.model} · 0G broker · live`
-                    : `${twin.status} · ${mode?.model ?? twin.model} · mock${mode?.reason ? ` · ${mode.reason.slice(0, 60)}${mode.reason.length > 60 ? '…' : ''}` : ''}`}
+            <ChatStatus mode={mode} isStreaming={isStreaming} />
           </div>
         </div>
         <div className="right" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -339,6 +334,9 @@ function ChatBody({ threadId, twin, seed, thread, onRename, onTouch, onNewChat, 
               </div>
             </div>
           ) : null}
+          {allMessages.length === 0 && !isStreaming ? (
+            <EmptyThread twin={twin} />
+          ) : null}
           {allMessages.map((m, i) => (
             <Message key={i} msg={m} onSavePreference={m.kind === 'user' ? savePreference : undefined} />
           ))}
@@ -352,26 +350,7 @@ function ChatBody({ threadId, twin, seed, thread, onRename, onTouch, onNewChat, 
               }}
             />
           ) : null}
-          {error ? (
-            <div
-              style={{
-                padding: '12px 14px',
-                background: 'rgba(255,80,80,0.06)',
-                border: '1px solid rgba(255,80,80,0.32)',
-                borderRadius: 10,
-                color: 'var(--red)',
-                fontSize: 12.5,
-                lineHeight: 1.5,
-              }}
-            >
-              <strong>0G compute call failed.</strong> {error}
-              {error.toLowerCase().includes('rate limit') ? (
-                <div style={{ marginTop: 6, color: 'var(--text-mute)' }}>
-                  The provider caps you at 10 req/min. Wait ~60s and retry.
-                </div>
-              ) : null}
-            </div>
-          ) : null}
+          {error ? <ChatErrorBanner error={error} /> : null}
         </div>
       </div>
 
@@ -430,11 +409,119 @@ function nowTime() {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-// Detect a media tool name in the director's reply. Tries explicit names
-// first, then falls back to verb-based heuristics keyed off the attachment
-// kind (image vs video vs audio).
-function detectMediaTool(_cue, replyText = '', attachments = []) {
-  const text = String(replyText ?? '').toLowerCase();
+function ChatErrorBanner({ error }) {
+  const lower = String(error ?? '').toLowerCase();
+  const reason = lower.includes('rate limit') || lower.includes('429')
+    ? { tag: 'rate limited', hint: 'Provider caps at 10 req/min. Wait ~60s.' }
+    : lower.includes('401') || lower.includes('unauthor') ? { tag: 'auth', hint: 'Check ZG_ROUTER_API_KEY.' }
+    : lower.includes('502') || lower.includes('503') || lower.includes('504') ? { tag: 'provider down', hint: '0G provider is unreachable — try again in a moment.' }
+    : lower.includes('cooldown') ? { tag: 'cooling down', hint: 'Compute is in cooldown after a recent failure.' }
+    : { tag: 'compute error', hint: null };
+  return (
+    <div
+      style={{
+        padding: '8px 12px',
+        background: 'rgba(255,80,80,0.06)',
+        border: '1px solid rgba(255,80,80,0.32)',
+        borderRadius: 8,
+        color: 'var(--red)',
+        fontSize: 12,
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 10,
+      }}
+    >
+      <span style={{ fontFamily: 'Geist Mono, monospace', fontSize: 10.5, padding: '1px 6px', background: 'rgba(255,80,80,0.12)', borderRadius: 4, whiteSpace: 'nowrap' }}>
+        {reason.tag}
+      </span>
+      <div style={{ flex: 1, color: 'var(--text-2)', lineHeight: 1.5 }}>
+        <div style={{ color: 'var(--red)' }}>{error}</div>
+        {reason.hint ? <div style={{ color: 'var(--text-mute)', fontSize: 11, marginTop: 2 }}>{reason.hint}</div> : null}
+      </div>
+    </div>
+  );
+}
+
+function EmptyThread({ twin }) {
+  const suggestions = [
+    { text: 'tell me about Sandeep Maheshwari', kind: 'Q&A' },
+    { text: 'draft a tweet about morning rituals', kind: 'Content' },
+    { text: 'give me my weekly review', kind: 'Swarm' },
+    { text: 'attach an image and ask: color the lizard black', kind: 'Tool' },
+  ];
+  return (
+    <div
+      style={{
+        marginTop: 40,
+        padding: 24,
+        background: 'var(--bg)',
+        border: '1px dashed var(--border)',
+        borderRadius: 12,
+        textAlign: 'center',
+        color: 'var(--text-mute)',
+      }}
+    >
+      <div style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 4 }}>
+        Fresh thread with {twin.name}.
+      </div>
+      <div style={{ fontSize: 11.5, marginBottom: 16 }}>
+        Ask a question, request content, or attach a file to edit.
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center' }}>
+        {suggestions.map((s) => (
+          <span
+            key={s.text}
+            style={{
+              fontSize: 11,
+              padding: '4px 10px',
+              border: '1px solid var(--border)',
+              borderRadius: 999,
+              color: 'var(--text-mute)',
+              fontFamily: 'Geist Mono, monospace',
+            }}
+          >
+            <span style={{ color: 'var(--peach)' }}>{s.kind}</span>
+            {' · '}
+            {s.text}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Compact status pill: dot + short label, hover for details. Replaces the
+// long "online · qwen/qwen-2.5-7b-instruct · 0G advanced · live" run-on.
+function ChatStatus({ mode, isStreaming }) {
+  const real = mode && mode.mode && mode.mode !== 'mock';
+  const dot = isStreaming ? 'var(--peach)' : real ? 'var(--mint)' : 'var(--amber)';
+  const label = isStreaming
+    ? 'thinking…'
+    : mode?.mode === 'router' ? '0G router · live'
+    : mode?.mode === 'advanced' ? '0G advanced · live'
+    : mode?.mode === 'broker' ? '0G broker · live'
+    : 'mock';
+  const tooltip = `${mode?.model ?? 'unknown model'}${mode?.reason ? ` · ${mode.reason}` : ''}`;
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} title={tooltip}>
+      <span style={{ color: dot }}>●</span>
+      <span>{label}</span>
+      {mode?.model ? (
+        <span style={{ color: 'var(--text-faint)', fontSize: 11 }}>· {mode.model.split('/').pop()}</span>
+      ) : null}
+    </span>
+  );
+}
+
+// Pick a media tool from the USER's instruction + attachment kind.
+// Called only when attachments are present, BEFORE pattern dispatch, so an
+// image-edit ask doesn't get sent through visual-post (which generates a
+// brand-new image instead of editing the attached one).
+function detectMediaToolFromIntent(userText = '', attachments = []) {
+  const text = String(userText ?? '').toLowerCase();
+  const kind = attachments[0]?.kind;
+
+  // 1. Explicit tool name in the user's message wins.
   const known = [
     'image.edit', 'image.resize', 'image.crop', 'image.format', 'image.watermark',
     'video.trim', 'video.reframe', 'video.burn_caption', 'video.audio_enhance',
@@ -443,25 +530,34 @@ function detectMediaTool(_cue, replyText = '', attachments = []) {
   ];
   for (const t of known) if (text.includes(t)) return t;
 
-  // Verb fallback — only if attachment kind matches.
-  const kind = attachments[0]?.kind;
+  // 2. Verb mapping keyed by attachment kind.
   if (kind === 'image') {
-    if (/\b(edit|color|colour|recolor|paint|change|make it|turn it|black and white|grayscale|invert|warmer|cooler|brighter|darker|saturate|desaturate)\b/.test(text)) return 'image.edit';
-    if (/\b(resize|scale)\b/.test(text)) return 'image.resize';
-    if (/\b(crop|trim)\b/.test(text)) return 'image.crop';
-    if (/\b(watermark|sign|brand)\b/.test(text)) return 'image.watermark';
-    if (/\b(convert|format|jpg|png|webp)\b/.test(text)) return 'image.format';
+    if (/\b(resize|scale|smaller|bigger|width|height)\b/.test(text)) return 'image.resize';
+    if (/\b(crop|trim away|cut out)\b/.test(text)) return 'image.crop';
+    if (/\b(watermark|sign|brand it)\b/.test(text)) return 'image.watermark';
+    if (/\b(convert to|format|to jpg|to png|to webp|to gif)\b/.test(text)) return 'image.format';
+    // Default for any other "do something to this image" ask. image.edit
+    // covers color/style/object edits via Qwen image-edit-2511 (or ffmpeg
+    // filter fallback).
+    return 'image.edit';
   }
   if (kind === 'video') {
-    if (/\b(trim|cut|clip|shorten)\b/.test(text)) return 'video.trim';
-    if (/\b(reframe|9:16|1:1|portrait|square|landscape|aspect)\b/.test(text)) return 'video.reframe';
-    if (/\b(caption|subtitle|burn)\b/.test(text)) return 'video.burn_caption';
-    if (/\b(denoise|enhance audio|loudness|normali[sz]e)\b/.test(text)) return 'video.audio_enhance';
-    if (/\b(gif)\b/.test(text)) return 'video.gif';
-    if (/\b(thumbnail|frame|poster)\b/.test(text)) return 'video.thumbnail';
-    if (/\b(compress|smaller|shrink)\b/.test(text)) return 'video.compress';
-    if (/\b(scene|cuts|chapter)\b/.test(text)) return 'video.scene_cuts';
-    if (/\b(summari[sz]e|describe|what.*in)\b/.test(text)) return 'video.summarize';
+    if (/\b(trim|cut|clip|shorten|first \d+ seconds|last \d+ seconds)\b/.test(text)) return 'video.trim';
+    if (/\b(reframe|9:16|1:1|16:9|portrait|square|landscape|aspect ratio)\b/.test(text)) return 'video.reframe';
+    if (/\b(caption|subtitle|burn|burn-in)\b/.test(text)) return 'video.burn_caption';
+    if (/\b(denoise|enhance audio|clean audio|loudness|normali[sz]e)\b/.test(text)) return 'video.audio_enhance';
+    if (/\b(gif|animate)\b/.test(text)) return 'video.gif';
+    if (/\b(thumbnail|frame at|poster|cover)\b/.test(text)) return 'video.thumbnail';
+    if (/\b(compress|smaller|shrink|reduce size)\b/.test(text)) return 'video.compress';
+    if (/\b(scene|cuts|chapters|edits)\b/.test(text)) return 'video.scene_cuts';
+    if (/\b(summari[sz]e|describe|what(?:'s| is) in|what does this)\b/.test(text)) return 'video.summarize';
+    // Default for ambiguous video ask: probe gives a safe non-destructive
+    // answer; user can pick a real tool from the result.
+    return 'video.probe';
+  }
+  if (kind === 'audio') {
+    // Only one audio-relevant tool today.
+    return 'video.audio_enhance';
   }
   return null;
 }

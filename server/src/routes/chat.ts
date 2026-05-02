@@ -78,13 +78,55 @@ function withSystem(
   history: ChatMessage[],
   ctx: { twinName: string; twitterHandle?: string | null; walletAddress?: string | null },
 ): ChatMessage[] {
-  const sys = systemPrompt(role, ctx);
+  let sys = systemPrompt(role, ctx);
   // Strip any client-supplied system message — the server controls the role.
   const filtered = history[0]?.role === 'system' ? history.slice(1) : history;
   // Keep only the most recent N messages to bound context size.
   const recent = filtered.slice(-HISTORY_TURN_CAP);
+
+  // Attachment-aware enrichment: if the latest user turn carries an
+  // [attached: <kind> <url>] marker (frontend convention), tell the director
+  // about the available media tools so it stops over-routing image edits to
+  // the visual-post pattern (which generates a fresh image, not edits).
+  if (role === 'director') {
+    const last = recent[recent.length - 1];
+    if (last?.role === 'user' && /\[attached:/i.test(last.content)) {
+      sys += ATTACHMENT_GUIDANCE;
+    }
+  }
+
   return [{ role: 'system', content: sys }, ...recent];
 }
+
+const ATTACHMENT_GUIDANCE = `
+
+ATTACHMENT MODE — the user has attached a file. The frontend will run the right tool automatically based on the user's instruction + attachment kind. Do NOT dispatch a pattern for media edits; patterns generate brand-new content (visual-post creates fresh images), they do NOT edit attached files.
+
+Available media tools the runtime can invoke on the attachment:
+  Image:
+    image.edit         — pixel-true edit via Qwen image-edit-2511 (object-aware: "color the lizard black", "remove the background", "add warm lighting")
+    image.resize       — width/height scaling
+    image.crop         — fixed crop window
+    image.format       — png ↔ jpg ↔ webp ↔ gif
+    image.watermark    — overlay text watermark
+  Video:
+    video.trim         — cut to [start, end] window
+    video.reframe      — 9:16 / 1:1 / 16:9 (crop or letterbox)
+    video.burn_caption — drawtext overlay
+    video.audio_enhance — denoise + EBU R128 loudness
+    video.scene_cuts   — detect scene timestamps
+    video.gif          — palette-optimised GIF export
+    video.thumbnail    — frame capture at time T
+    video.compress     — re-encode at lower bitrate
+    video.summarize    — midpoint frame → Qwen-VL describe
+  Audio:
+    video.audio_enhance — also accepts standalone audio
+
+How to respond when an attachment is present:
+- Reply in 1 short sentence acknowledging what you'll do, e.g. "Got it — running image.edit with 'color the lizard white'."
+- Do NOT mention dispatching to specialists or routing patterns.
+- Do NOT simulate the result.
+- Just confirm the action; the runtime takes it from there.`;
 
 function streamChat(
   reply: FastifyReply,
