@@ -102,6 +102,12 @@ export const personaApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tweets, twin }),
     }).then(unwrap),
+  fromQuestionnaire: (answers, twin) =>
+    fetch(url('/api/persona/from-questionnaire'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answers, twin }),
+    }).then(unwrap),
 };
 
 export const finetuneApi = {

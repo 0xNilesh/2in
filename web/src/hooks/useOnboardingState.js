@@ -9,6 +9,7 @@ const empty = {
   step: 0,
   twinName: '',
   twitter: null, // { handle, name, userId, accessToken, avatar, bio, stats, tweets: [...] }
+  questionnaire: null, // { answers, result: { seeded, idolPacks }, completed: bool }
 };
 
 function read() {

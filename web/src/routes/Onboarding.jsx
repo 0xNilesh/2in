@@ -25,6 +25,7 @@ import { demoTweets, demoTwitterAccount } from '../data/demo-tweets.js';
 import { StatusPill } from '../components/StatusPill.jsx';
 import { SocialIcon } from '../components/SocialIcon.jsx';
 import { personaApi, storageApi } from '../lib/api.js';
+import { Questionnaire } from '../components/Questionnaire.jsx';
 import { useMintRoster } from '../hooks/useMintRoster.js';
 import { isChainConfigured } from '../lib/chain.js';
 import { useViemWalletClient } from '../lib/privy-signer.js';
@@ -52,7 +53,8 @@ export default function Onboarding() {
 
   const canContinue = (() => {
     if (state.step === 0) return auth.authenticated;
-    if (state.step === 1) return Boolean(state.twitter?.handle); // at least one social connected
+    // step 1: either a social platform is connected OR the questionnaire was submitted
+    if (state.step === 1) return Boolean(state.twitter?.handle) || Boolean(state.questionnaire?.completed);
     if (state.step === 2) return Boolean(state.twinName.trim());
     return true;
   })();
@@ -188,18 +190,64 @@ const PLATFORMS = [
 ];
 
 function Ingest({ state, update }) {
-  const [expanded, setExpanded] = useState(state.twitter?.handle ? null : 'x');
+  const [expanded, setExpanded] = useState(() => {
+    if (state.twitter?.handle || state.questionnaire?.completed) return null;
+    return 'questionnaire';
+  });
   const t = state.twitter;
   const connected = Boolean(t?.handle);
+  const questionnaireDone = Boolean(state.questionnaire?.completed);
 
   return (
     <>
       <div className="onboard-eyebrow">step 2 of 5</div>
       <h2 className="onboard-title">Show us your voice.</h2>
       <p className="onboard-sub">
-        Connect at least one platform — we ingest your existing posts so each
-        specialist can train on how you sound. Read-only. We never publish.
+        Pick the path that's quickest for you — fill the personality questionnaire
+        OR drop your X archive. Either populates your twin's memory before the
+        first chat. Read-only. We never publish.
       </p>
+
+      {/* Questionnaire — recommended primary path. */}
+      <div
+        className={`social-card${questionnaireDone ? ' connected' : ''}${expanded === 'questionnaire' ? ' expanded' : ''}`}
+        onClick={questionnaireDone || expanded === 'questionnaire' ? undefined : () => setExpanded('questionnaire')}
+        style={{ marginBottom: 12 }}
+      >
+        <div className="social-card-head">
+          <div className="social-icon" style={{ background: 'var(--peach-10)', color: 'var(--peach)' }}>✦</div>
+          <div className="social-meta">
+            <div className="social-name">
+              {questionnaireDone ? 'Questionnaire complete' : 'Quick questionnaire'}
+            </div>
+            <div className="social-sub">
+              {questionnaireDone
+                ? `seeded ${Object.values(state.questionnaire.result?.seeded ?? {}).reduce((a, b) => a + b, 0)} entries · `
+                  + `${(state.questionnaire.result?.idolPacks ?? []).length} idol packs`
+                : '~3 min · 8 questions + your idols → seeds memory across all 6 types'}
+            </div>
+          </div>
+          {questionnaireDone ? (
+            <span className="social-pill connected">connected</span>
+          ) : (
+            <span className="social-pill" style={{ background: 'var(--peach-10)', color: 'var(--peach)' }}>recommended</span>
+          )}
+        </div>
+
+        {expanded === 'questionnaire' && !questionnaireDone ? (
+          <div className="social-card-body" style={{ paddingTop: 0 }}>
+            <Questionnaire
+              initial={state.questionnaire ?? undefined}
+              onChange={(answers) => update({
+                questionnaire: { ...(state.questionnaire ?? {}), answers, completed: false },
+              })}
+              onComplete={({ answers, result }) => update({
+                questionnaire: { answers, result, completed: true },
+              })}
+            />
+          </div>
+        ) : null}
+      </div>
 
       <div className="social-grid">
         {PLATFORMS.map((p) => {
