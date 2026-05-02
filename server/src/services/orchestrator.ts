@@ -51,6 +51,16 @@ export interface Pattern {
 }
 
 export const PATTERNS: Record<string, Pattern> = {
+  'absorb': {
+    id: 'absorb',
+    title: 'absorb',
+    description: 'Single Companion step. Use when the user shares personal context / identity / preferences ("I\'m a YC founder", "my audience is technical founders", "my tone is terse", "remember this about me"). Companion extracts facts and writes them to semantic + relationship memory so future drafts read them back. Do NOT use for content production.',
+    steps: [
+      {
+        idx: 1, agent: 'companion', label: 'Absorb facts to semantic + relationship memory',
+      },
+    ],
+  },
   'answer': {
     id: 'answer',
     title: 'answer',
@@ -233,6 +243,10 @@ If no pattern is a clean fit, default to "daily-post".`;
 
 function regexFallback(userInput: string): string {
   const lower = userInput.toLowerCase();
+  // Identity / preference statements — Companion absorbs to memory. Match
+  // BEFORE the production-verb rules so "I post X" doesn't get pulled into
+  // daily-post.
+  if (/^(i'?m |i am |my (audience|tone|voice|style|niche|background|focus|goal|industry) |remember (this|that)|i (post|build|write|run|work) )/.test(lower)) return 'absorb';
   // Q&A / lookup queries — single Researcher answer, no Writer/Editor.
   if (/^(who is|what is|tell me about|explain|describe|when did|where (is|did)|why (is|do))/.test(lower)) return 'answer';
   if (/(weekly review|review the week|swarm review|how (did|was) (this |last )?week|review my week)/.test(lower)) return 'weekly-review';
