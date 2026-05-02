@@ -238,8 +238,8 @@ function Ingest({ state, update }) {
           <div className="social-card-body" style={{ paddingTop: 0 }}>
             <Questionnaire
               initial={state.questionnaire ?? undefined}
-              onChange={(answers) => update({
-                questionnaire: { ...(state.questionnaire ?? {}), answers, completed: false },
+              onChange={({ answers, step }) => update({
+                questionnaire: { ...(state.questionnaire ?? {}), answers, step, completed: false },
               })}
               onComplete={({ answers, result }) => update({
                 questionnaire: { answers, result, completed: true },

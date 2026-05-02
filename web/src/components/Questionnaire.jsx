@@ -181,7 +181,14 @@ const empty = (() => {
 
 export function Questionnaire({ initial, onChange, onComplete }) {
   const [answers, setAnswers] = useState(() => ({ ...empty, ...(initial?.answers ?? {}) }));
-  const [step, setStep] = useState(0);
+  // Restore the step the user was on so a reload doesn't bump them back to
+  // question 1 even though their answers are still filled in.
+  const initialStep = (() => {
+    const s = Number(initial?.step ?? 0);
+    if (!Number.isFinite(s) || s < 0) return 0;
+    return Math.min(s, QUESTIONS.length - 1);
+  })();
+  const [step, setStep] = useState(initialStep);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(initial?.result ?? null);
@@ -198,16 +205,32 @@ export function Questionnaire({ initial, onChange, onComplete }) {
   const current = QUESTIONS[step];
   const total = QUESTIONS.length;
 
+  // Single change-emit helper so any update (answer OR step) gets persisted
+  // by the parent atomically as { answers, step }.
+  const emit = (nextAnswers, nextStep) => {
+    onChange?.({ answers: nextAnswers, step: nextStep });
+  };
+
   const patch = (id, v) => {
-    const next = { ...answers, [id]: v };
-    setAnswers(next);
-    onChange?.(next);
+    const nextAnswers = { ...answers, [id]: v };
+    setAnswers(nextAnswers);
+    emit(nextAnswers, step);
   };
 
   const next = () => {
-    if (step < total - 1) setStep(step + 1);
+    if (step < total - 1) {
+      const nextStep = step + 1;
+      setStep(nextStep);
+      emit(answers, nextStep);
+    }
   };
-  const back = () => { if (step > 0) setStep(step - 1); };
+  const back = () => {
+    if (step > 0) {
+      const nextStep = step - 1;
+      setStep(nextStep);
+      emit(answers, nextStep);
+    }
+  };
 
   const isAnswered = (q, val) => {
     if (q.optional) return true;
