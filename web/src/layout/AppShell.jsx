@@ -7,23 +7,38 @@
 // A global toast stack lives at the bottom-right and bridges every async
 // surface (memory writes, snapshots, tx echoes, tool failures).
 
-import { Outlet, useSearchParams } from 'react-router-dom';
+import { Outlet, useSearchParams, Navigate } from 'react-router-dom';
 import { Rail } from './Rail.jsx';
 import { WorkPane } from '../components/WorkPane.jsx';
 import { FineTunePane } from '../components/FineTunePane.jsx';
 import { ToastStack } from '../components/ToastStack.jsx';
 import { useSnapshotToasts } from '../hooks/useSnapshotToasts.js';
 import { useMemoryToasts } from '../hooks/useMemoryStream.js';
+import { useAuth } from '../hooks/useAuth.js';
+import { hasMintedTwin } from '../data/specialists.js';
 
 export function AppShell() {
   const [params] = useSearchParams();
   const showTask = params.get('task');
   const showFineTune = params.get('finetune');
+  const auth = useAuth();
 
   // Subscribe globally so any snapshot/memory event fires a toast regardless
   // of which page the user is on.
   useSnapshotToasts();
   useMemoryToasts();
+
+  // Onboarding gate. Two conditions reroute the user out of the shell:
+  //   1. Privy not authenticated → back to landing.
+  //   2. Authenticated but no master twin minted → finish onboarding first.
+  // We wait for `auth.ready` so the redirect doesn't fire on initial mount
+  // before Privy resolves the session.
+  if (auth.ready && auth.configured && !auth.authenticated) {
+    return <Navigate to="/" replace />;
+  }
+  if (auth.ready && auth.authenticated && !hasMintedTwin()) {
+    return <Navigate to="/onboarding" replace />;
+  }
 
   return (
     <div className="app">

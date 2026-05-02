@@ -77,9 +77,6 @@ export default function Onboarding() {
     <div className="onboard">
       <nav className="onboard-nav">
         <div className="brand">2<em>in</em></div>
-        <a className="skip" onClick={() => nav(ROUTES.chat)} style={{ cursor: 'pointer' }}>
-          Skip · land in chat →
-        </a>
       </nav>
 
       <div className="onboard-progress">

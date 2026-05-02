@@ -227,3 +227,11 @@ export function getRoster() {
 export function clearMints() {
   try { window.localStorage.removeItem(MINTS_KEY); } catch {}
 }
+
+/** True once useMintRoster has persisted a master mint with a tokenId.
+ *  Used by Landing + AppShell to decide whether a logged-in user should
+ *  be sent to /onboarding before they can use the app. */
+export function hasMintedTwin() {
+  if (typeof window === 'undefined') return false;
+  return Boolean(readMints().master?.tokenId);
+}

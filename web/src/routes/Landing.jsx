@@ -4,13 +4,19 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { ROUTES } from '../lib/routes.js';
 import { useAuth } from '../hooks/useAuth.js';
+import { hasMintedTwin } from '../data/specialists.js';
 
 export default function Landing() {
   const { ready, authenticated, address, login, logout } = useAuth();
   const nav = useNavigate();
 
+  // Authed users with no master twin minted go through onboarding first;
+  // anyone else goes to chat. Mirrors the AppShell guard so Landing doesn't
+  // bounce them via a flicker.
+  const postLoginRoute = () => (hasMintedTwin() ? ROUTES.chat : ROUTES.onboarding);
+
   const enter = () => {
-    if (authenticated) nav(ROUTES.chat);
+    if (authenticated) nav(postLoginRoute());
     else login();
   };
 
@@ -30,7 +36,9 @@ export default function Landing() {
               <span style={{ fontFamily: 'Geist Mono, monospace', fontSize: 12, color: 'var(--text-mute)' }}>
                 {address ? `${address.slice(0, 6)}…${address.slice(-4)}` : 'connected'}
               </span>
-              <Link to={ROUTES.chat} className="btn-cta">Open app →</Link>
+              <Link to={postLoginRoute()} className="btn-cta">
+                {hasMintedTwin() ? 'Open app →' : 'Finish setup →'}
+              </Link>
               <button className="btn-secondary" onClick={logout}>Log out</button>
             </>
           ) : (
