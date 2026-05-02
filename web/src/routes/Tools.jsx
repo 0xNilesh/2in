@@ -110,12 +110,14 @@ function ToolCard({ tool }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const [values, setValues] = useState(() => initialValuesFromSchema(tool.input));
+  const [startedAt, setStartedAt] = useState(null);
 
   const submit = async (e) => {
     e?.preventDefault?.();
     setBusy(true);
     setErr(null);
     setResult(null);
+    setStartedAt(Date.now());
     try {
       const out = await toolsApi.invoke(tool.name, coerceValues(values, tool.input));
       setResult(out);
@@ -123,6 +125,7 @@ function ToolCard({ tool }) {
       setErr(er.message ?? 'invoke_failed');
     } finally {
       setBusy(false);
+      setStartedAt(null);
     }
   };
 
@@ -163,12 +166,79 @@ function ToolCard({ tool }) {
               {busy ? 'invoking…' : 'Run'}
             </button>
           </div>
+          {busy ? <LoadingPanel toolName={tool.name} startedAt={startedAt} /> : null}
           {err ? (
             <div style={{ marginTop: 6, color: 'var(--red)', fontSize: 12 }}>{err}</div>
           ) : null}
           {result ? <ResultView result={result} /> : null}
         </form>
       ) : null}
+    </div>
+  );
+}
+
+function LoadingPanel({ toolName, startedAt }) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 250);
+    return () => clearInterval(id);
+  }, []);
+  const elapsed = startedAt ? Math.round((Date.now() - startedAt) / 100) / 10 : 0;
+  // Tool-specific hint about what's happening + how long it usually takes.
+  const hint = (() => {
+    if (toolName === 'image.edit') return 'Calling 0G qwen-image-edit-2511 — usually 20–60s';
+    if (toolName === 'video.audio_enhance') return 'Running afftdn + EBU R128 — proportional to clip length';
+    if (toolName === 'video.reframe' || toolName === 'video.compress') return 'Re-encoding via ffmpeg — proportional to clip length';
+    if (toolName === 'video.scene_cuts') return 'Scanning frames for scene changes';
+    if (toolName === 'video.summarize') return 'Extracting midpoint frame → Qwen-VL describe';
+    if (toolName.startsWith('video.')) return 'Running ffmpeg — usually a few seconds';
+    if (toolName.startsWith('image.')) return 'Running ffmpeg — typically <1s';
+    if (toolName === 'transcribe') return 'Transcribing audio via Whisper';
+    if (toolName === 'gen_image' || toolName === 'analyze_image') return 'Calling 0G compute';
+    if (toolName === 'find_clips') return 'Asking Qwen to pick high-leverage spans';
+    if (toolName.startsWith('search_') || toolName.startsWith('read_') || toolName.startsWith('write_')) return 'Hitting the in-memory KV — should be instant';
+    return 'Running…';
+  })();
+  return (
+    <div
+      style={{
+        marginTop: 10,
+        padding: 12,
+        background: 'var(--bg)',
+        border: '1px solid var(--peach)',
+        borderRadius: 8,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+      }}
+    >
+      <Spinner />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12, color: 'var(--peach)', fontFamily: 'Geist Mono, monospace' }}>
+          {toolName} · {elapsed.toFixed(1)}s
+        </div>
+        <div style={{ fontSize: 11.5, color: 'var(--text-mute)', marginTop: 2 }}>
+          {hint}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Spinner() {
+  return (
+    <div
+      style={{
+        width: 16,
+        height: 16,
+        border: '2px solid rgba(255,138,91,0.25)',
+        borderTopColor: 'var(--peach)',
+        borderRadius: '50%',
+        animation: 'tools-spin 0.8s linear infinite',
+        flexShrink: 0,
+      }}
+    >
+      <style>{'@keyframes tools-spin { to { transform: rotate(360deg) } }'}</style>
     </div>
   );
 }
