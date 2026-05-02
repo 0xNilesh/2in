@@ -448,19 +448,19 @@ function UserInput({ q, value, onChange, disabled }) {
           onChange={(e) => onChange(e.target.value)}
           placeholder={q.placeholder ?? ''}
           disabled={disabled}
-          style={{ marginLeft: 34 }}
+          style={{ marginLeft: 34, padding: '9px 12px', fontSize: 13.5, borderRadius: 8 }}
         />
       );
     case 'longtext':
       return (
         <textarea
           className="onboard-input"
-          rows={2}
+          rows={3}
           value={value ?? ''}
           onChange={(e) => onChange(e.target.value)}
           placeholder={q.placeholder ?? ''}
           disabled={disabled}
-          style={{ marginLeft: 34, padding: '8px 10px', resize: 'vertical' }}
+          style={{ marginLeft: 34, padding: '9px 12px', fontSize: 13.5, borderRadius: 8, resize: 'vertical', lineHeight: 1.5 }}
         />
       );
     case 'chips':
