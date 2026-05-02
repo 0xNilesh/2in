@@ -42,10 +42,19 @@ export default function Onboarding() {
   const back = () => update({ step: Math.max(state.step - 1, 0) });
 
   const finish = () => {
+    // Pull the real master tokenId from the persisted mint map so the
+    // chat header / specialist profile show the actual minted tokenId
+    // instead of the static demo #42.
+    let masterTokenId;
+    try {
+      const mints = JSON.parse(window.localStorage.getItem('2in:mints') ?? '{}');
+      masterTokenId = mints?.master?.tokenId;
+    } catch { /* ignore */ }
     setTwin({
       name: state.twinName.trim() || '2in',
       twitterHandle: state.twitter?.handle ?? null,
       walletAddress: auth.address ?? null,
+      ...(masterTokenId != null ? { tokenId: masterTokenId } : {}),
     });
     reset();
     nav(ROUTES.chat);

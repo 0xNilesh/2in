@@ -10,23 +10,46 @@
 
 import { readTwin } from '../hooks/useTwin.js';
 
+const MINTS_KEY = '2in:mints';
+
+// Map persisted mint results { master, writer, researcher, ... } to the
+// real tokenIds + tx hashes recorded by useMintRoster after onboarding's
+// mint flow. Falls back to the static demo tokenId when nothing's been
+// persisted (e.g. fresh browser, or the mock-mode mint flow).
+function readMints() {
+  if (typeof window === 'undefined') return {};
+  try { return JSON.parse(window.localStorage.getItem(MINTS_KEY) ?? '{}'); }
+  catch { return {}; }
+}
+
+function realTokenId(specialistId, fallback) {
+  const m = readMints()[specialistId];
+  return m?.tokenId ?? fallback;
+}
+
+function realTxHash(specialistId) {
+  return readMints()[specialistId]?.txHash ?? null;
+}
+
 export function getDirector() {
   const twin = readTwin();
+  // Master mint persists under id 'master' in useMintRoster.
+  const tokenId = realTokenId('master', twin.tokenId);
   return {
     id: 'director',
     initial: (twin.name?.[0] ?? '2').toUpperCase(),
     name: twin.name,
     fullName: `${twin.name} · ${twin.tagline}`,
     role: 'Director',
-    tokenId: twin.tokenId,
+    tokenId,
     parent: null,
     model: twin.model,
     status: twin.status,
     variant: 'dir',
     adapterURI: null,
-    corpusURI: '0x0000…master',
+    corpusURI: null,
     trainedOn: 'master twin · learns from your full corpus',
-    jobs: 184,
+    txHash: realTxHash('master'),
     description:
       'Master twin. Plan-reflect loop, picks the orchestration pattern, dispatches subagents and tools.',
   };
@@ -182,9 +205,25 @@ export const specialists = [...coreSpecialists, ...optionalSpecialists];
 
 export function getSpecialist(id) {
   if (id === 'director') return getDirector();
-  return specialists.find((s) => s.id === id);
+  const base = specialists.find((s) => s.id === id);
+  if (!base) return null;
+  return {
+    ...base,
+    tokenId: realTokenId(id, base.tokenId),
+    txHash: realTxHash(id),
+  };
 }
 
 export function getRoster() {
-  return [getDirector(), ...specialists];
+  return [getDirector(), ...specialists.map((s) => ({
+    ...s,
+    tokenId: realTokenId(s.id, s.tokenId),
+    txHash: realTxHash(s.id),
+  }))];
+}
+
+/** Re-exported so other places (Settings reset, debug tools) can clear
+ *  the persisted mint map. */
+export function clearMints() {
+  try { window.localStorage.removeItem(MINTS_KEY); } catch {}
 }

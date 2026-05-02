@@ -109,6 +109,28 @@ export function useMintRoster({ twinName, walletAddress, signer, corpusUri }) {
     }
     setRunning(false);
     setDone(true);
+    // Persist the real (specialistId → tokenId, txHash) map so the rest
+    // of the app (Specialist profile, Rail, Settings) can show ACTUAL
+    // tokenIds instead of the static demo numbers in data/specialists.js.
+    persistMints();
+    function persistMints() {
+      try {
+        const mints = {};
+        // Re-read the latest rows from setRows callback by snapshotting
+        // here. We can't read `rows` directly because setRows is async;
+        // instead we know the loop above just finished, so we re-snapshot
+        // via a setRows pass-through.
+        setRows((rs) => {
+          for (const r of rs) {
+            if (r.tokenId != null && r.txHash != null) {
+              mints[r.id] = { tokenId: r.tokenId, txHash: r.txHash, explorerUrl: r.explorerUrl ?? null };
+            }
+          }
+          window.localStorage.setItem('2in:mints', JSON.stringify(mints));
+          return rs;
+        });
+      } catch { /* ignore */ }
+    }
   }, [running, twinName, walletAddress, signer, corpusUri]);
 
   return { rows, start, reset, running, done };
