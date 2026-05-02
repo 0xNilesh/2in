@@ -48,12 +48,6 @@ const Schema = z.object({
   ZG_IMAGE_EDIT_API_KEY: z.string().optional(),
   ZG_IMAGE_EDIT_MODEL: z.string().default('qwen/qwen-image-edit-2511'),
 
-  // Optional Hugging Face Inference API token for the zero-shot intent
-  // classifier (BART-large-mnli). Free tier works WITHOUT this var
-  // (rate-limited ~30 req/hr); set it (free account at huggingface.co
-  // → Settings → Access Tokens) for higher throughput.
-  HF_INFERENCE_API_KEY: z.string().optional(),
-
   // Broker mode — wallet-signed per-call. Used only if ZG_ROUTER_API_KEY
   // isn't set. The 2.0.0 SDK has known setup issues; Router is preferred.
   BROKER_PRIVATE_KEY: z.string().optional(),

@@ -286,14 +286,17 @@ function regexFallback(userInput: string): string {
   return 'answer';
 }
 
-export async function routePattern(userInput: string, _ctx: PromptContext): Promise<{ pattern: Pattern; source: 'hf' | 'llm' | 'regex'; confidence?: number }> {
-  // Layer 1 — zero-shot intent classifier (BART-large-mnli on HF). Cheapest,
-  // most reliable signal. Returns null if HF is cold/down or confidence < 0.55.
+export async function routePattern(userInput: string, _ctx: PromptContext): Promise<{ pattern: Pattern; source: 'qwen-classifier' | 'llm' | 'regex'; confidence?: number }> {
+  // Layer 1 — tight Qwen classifier. JSON-only, ~1.5s, returns
+  // {pattern, confidence}. Cheaper than the heavier LLM router below
+  // because the prompt only carries pattern IDs + short hints, not full
+  // descriptions. Returns null if confidence < 0.6 or if compute is in
+  // cooldown after a recent failure.
   const intent = await classifyIntent(userInput);
   if (intent && PATTERNS[intent.pattern]) {
     // eslint-disable-next-line no-console
-    console.info(`[router] hf picked ${intent.pattern} (conf ${intent.confidence.toFixed(2)})`);
-    return { pattern: PATTERNS[intent.pattern]!, source: 'hf', confidence: intent.confidence };
+    console.info(`[router] qwen-classifier picked ${intent.pattern} (conf ${intent.confidence.toFixed(2)})`);
+    return { pattern: PATTERNS[intent.pattern]!, source: 'qwen-classifier', confidence: intent.confidence };
   }
 
   // Layer 2 — LLM router (Qwen with the pattern catalog as system prompt).
