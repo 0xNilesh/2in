@@ -10,6 +10,12 @@
 //   real → @0gfoundation/0g-ts-sdk Indexer.upload + (TODO) KV via SDK
 //   mock → deterministic sha256-based fake hashes; in-memory blob + KV maps
 //
+// KV persistence has TWO backends, picked at startup:
+//   mongo → MongoDB Atlas (when MONGO_URI is set). Survives server
+//           restarts on ephemeral hosts like Render free tier.
+//   disk  → in-memory Map mirrored to /tmp/2in-kv-state.json. Default.
+// Same 5-method API either way.
+//
 // We keep the SDK integration loosely typed because the package surface is
 // still moving (per Phase 1 snapshot). Blob upload is wired to the real
 // Indexer; KV reads/writes are intentionally still in-memory until the SDK
@@ -36,12 +42,24 @@ export interface KvEntry {
 
 export interface StorageMode {
   blobs: 'real' | 'mock';
-  kv: 'real' | 'mock';
+  kv: 'real' | 'mock' | 'mongo';
   reason?: string;
 }
 
-// Disk mirror for the in-memory KV mock — survives server restarts so users
-// don't lose memory entries every dev reload. Lives next to the upload dir.
+// Internal contract every KV backend implements. Mirrors the 5 public
+// methods on StorageService — keeps the picker dumb.
+interface KvBackend {
+  writeKv(stream: string, key: string, value: string): Promise<void>;
+  readKv(stream: string, key: string): Promise<string | null>;
+  listKv(stream: string): Promise<KvEntry[]>;
+  updateKv(stream: string, key: string, value: string): Promise<boolean>;
+  deleteKv(stream: string, key: string): Promise<boolean>;
+}
+
+// === Disk KV backend ================================================
+// In-memory Map mirrored to /tmp/2in-kv-state.json with a 250 ms coalesced
+// flush. Default backend; works on any host with writable /tmp. Loses data
+// on hosts where /tmp is non-persistent (e.g. Render free tier cold starts).
 const KV_PERSIST_PATH = join(tmpdir(), '2in-kv-state.json');
 
 function loadKvFromDisk(): Map<string, Map<string, KvEntry>> {
@@ -61,44 +79,137 @@ function loadKvFromDisk(): Map<string, Map<string, KvEntry>> {
   return out;
 }
 
-let pendingFlush: NodeJS.Timeout | null = null;
-function flushKvToDisk(kv: Map<string, Map<string, KvEntry>>): void {
-  // Coalesce writes — if many calls land in the same tick, only the last
-  // one survives, and we still hit disk soon enough that crash recovery
-  // loses at most ~250ms of writes.
-  if (pendingFlush) clearTimeout(pendingFlush);
-  pendingFlush = setTimeout(() => {
-    pendingFlush = null;
-    try {
-      const obj: Record<string, KvEntry[]> = {};
-      for (const [stream, bucket] of kv) {
-        obj[stream] = Array.from(bucket.values());
+class DiskKvBackend implements KvBackend {
+  private mem = loadKvFromDisk();
+  private pendingFlush: NodeJS.Timeout | null = null;
+
+  private flush(): void {
+    if (this.pendingFlush) clearTimeout(this.pendingFlush);
+    this.pendingFlush = setTimeout(() => {
+      this.pendingFlush = null;
+      try {
+        const obj: Record<string, KvEntry[]> = {};
+        for (const [stream, bucket] of this.mem) {
+          obj[stream] = Array.from(bucket.values());
+        }
+        const dir = dirname(KV_PERSIST_PATH);
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+        writeFileSync(KV_PERSIST_PATH, JSON.stringify(obj));
+      } catch {
+        // Disk full / read-only — silent. In-memory copy still works.
       }
-      const dir = dirname(KV_PERSIST_PATH);
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-      writeFileSync(KV_PERSIST_PATH, JSON.stringify(obj));
-    } catch {
-      // Disk full / read-only — silent. The in-memory copy still works.
-    }
-  }, 250);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (pendingFlush as any).unref?.();
+    }, 250);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (this.pendingFlush as any).unref?.();
+  }
+
+  async writeKv(stream: string, key: string, value: string): Promise<void> {
+    let bucket = this.mem.get(stream);
+    if (!bucket) { bucket = new Map(); this.mem.set(stream, bucket); }
+    bucket.set(key, { key, value, ts: Date.now() });
+    this.flush();
+  }
+  async readKv(stream: string, key: string): Promise<string | null> {
+    return this.mem.get(stream)?.get(key)?.value ?? null;
+  }
+  async listKv(stream: string): Promise<KvEntry[]> {
+    return Array.from(this.mem.get(stream)?.values() ?? []).sort((a, b) => b.ts - a.ts);
+  }
+  async updateKv(stream: string, key: string, value: string): Promise<boolean> {
+    const bucket = this.mem.get(stream);
+    if (!bucket || !bucket.has(key)) return false;
+    bucket.set(key, { key, value, ts: Date.now() });
+    this.flush();
+    return true;
+  }
+  async deleteKv(stream: string, key: string): Promise<boolean> {
+    const bucket = this.mem.get(stream);
+    if (!bucket || !bucket.has(key)) return false;
+    bucket.delete(key);
+    this.flush();
+    return true;
+  }
+}
+
+// === Mongo KV backend ===============================================
+// Single collection `twin_kv` with one document per (stream, key).
+// Picked when MONGO_URI is set. Survives ephemeral filesystems.
+async function createMongoKv(uri: string, dbName: string): Promise<KvBackend> {
+  // Dynamic import keeps the driver out of cold start when not used.
+  const { MongoClient } = await import('mongodb');
+  const client = new MongoClient(uri);
+  await client.connect();
+  const col = client.db(dbName).collection<{
+    stream: string; key: string; value: string; ts: number;
+  }>('twin_kv');
+  await Promise.all([
+    col.createIndex({ stream: 1, key: 1 }, { unique: true }),
+    col.createIndex({ stream: 1, ts: -1 }),
+  ]);
+
+  return {
+    async writeKv(stream, key, value) {
+      await col.updateOne(
+        { stream, key },
+        { $set: { stream, key, value, ts: Date.now() } },
+        { upsert: true },
+      );
+    },
+    async readKv(stream, key) {
+      const doc = await col.findOne({ stream, key });
+      return doc?.value ?? null;
+    },
+    async listKv(stream) {
+      const docs = await col.find({ stream }).sort({ ts: -1 }).toArray();
+      return docs.map((d) => ({ key: d.key, value: d.value, ts: d.ts }));
+    },
+    async updateKv(stream, key, value) {
+      const res = await col.updateOne(
+        { stream, key },
+        { $set: { value, ts: Date.now() } },
+      );
+      return res.matchedCount > 0;
+    },
+    async deleteKv(stream, key) {
+      const res = await col.deleteOne({ stream, key });
+      return res.deletedCount > 0;
+    },
+  };
 }
 
 class StorageService {
   private indexerPromise: Promise<unknown> | null = null;
   private mockBlobs = new Map<string, Buffer>();
-  private mockKv = loadKvFromDisk();
+  private diskKv = new DiskKvBackend();
+  private kvPromise: Promise<KvBackend> | null = null;
+
+  // Picks the KV backend lazily on first access. Once resolved the
+  // promise is reused so all 5 KV methods share a single connection.
+  private kv(): Promise<KvBackend> {
+    if (!this.kvPromise) {
+      if (config.MONGO_URI) {
+        this.kvPromise = createMongoKv(config.MONGO_URI, config.MONGO_DB_NAME).catch((err) => {
+          // eslint-disable-next-line no-console
+          console.error('[storage] MongoDB connect failed — falling back to disk', err?.message);
+          this.kvPromise = Promise.resolve(this.diskKv);
+          return this.diskKv;
+        });
+      } else {
+        this.kvPromise = Promise.resolve(this.diskKv);
+      }
+    }
+    return this.kvPromise;
+  }
 
   get mode(): StorageMode {
+    const kv: StorageMode['kv'] = config.MONGO_URI ? 'mongo' : 'mock';
+    const reason = config.MONGO_URI
+      ? 'KV persisted to MongoDB'
+      : 'MONGO_URI not set — KV mirrored to /tmp (ephemeral on free hosts)';
     if (config.STORAGE_PRIVATE_KEY) {
-      return { blobs: 'real', kv: 'mock', reason: 'KV stream SDK still in flux — using in-memory mirror' };
+      return { blobs: 'real', kv, reason };
     }
-    return {
-      blobs: 'mock',
-      kv: 'mock',
-      reason: 'STORAGE_PRIVATE_KEY not set — running in mock mode',
-    };
+    return { blobs: 'mock', kv, reason: `${reason} · STORAGE_PRIVATE_KEY not set — blobs in-memory` };
   }
 
   gatewayUrl(rootHash: string): string {
@@ -121,39 +232,21 @@ class StorageService {
     return this.realDownload(rootHash);
   }
 
-  // === KV (in-memory mirror, disk-persisted) ====================
+  // === KV — delegates to the picked backend =====================
   async writeKv(stream: string, key: string, value: string): Promise<void> {
-    let bucket = this.mockKv.get(stream);
-    if (!bucket) {
-      bucket = new Map();
-      this.mockKv.set(stream, bucket);
-    }
-    bucket.set(key, { key, value, ts: Date.now() });
-    flushKvToDisk(this.mockKv);
+    return (await this.kv()).writeKv(stream, key, value);
   }
-
   async readKv(stream: string, key: string): Promise<string | null> {
-    return this.mockKv.get(stream)?.get(key)?.value ?? null;
+    return (await this.kv()).readKv(stream, key);
   }
-
   async listKv(stream: string): Promise<KvEntry[]> {
-    return Array.from(this.mockKv.get(stream)?.values() ?? []).sort((a, b) => b.ts - a.ts);
+    return (await this.kv()).listKv(stream);
   }
-
   async updateKv(stream: string, key: string, value: string): Promise<boolean> {
-    const bucket = this.mockKv.get(stream);
-    if (!bucket || !bucket.has(key)) return false;
-    bucket.set(key, { key, value, ts: Date.now() });
-    flushKvToDisk(this.mockKv);
-    return true;
+    return (await this.kv()).updateKv(stream, key, value);
   }
-
   async deleteKv(stream: string, key: string): Promise<boolean> {
-    const bucket = this.mockKv.get(stream);
-    if (!bucket || !bucket.has(key)) return false;
-    bucket.delete(key);
-    flushKvToDisk(this.mockKv);
-    return true;
+    return (await this.kv()).deleteKv(stream, key);
   }
 
   // === real backend ============================================

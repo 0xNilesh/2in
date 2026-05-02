@@ -69,6 +69,13 @@ const Schema = z.object({
   STORAGE_INDEXER: z.string().default('https://indexer-storage-testnet-turbo.0g.ai'),
   STORAGE_GATEWAY: z.string().default('https://indexer-storage-turbo.0g.ai'),
 
+  // KV persistence. Without MONGO_URI, KV writes mirror to /tmp on disk
+  // (fine for local dev, breaks on Render free tier where /tmp resets on
+  // every cold start). Set MONGO_URI to a MongoDB Atlas M0 connection
+  // string to persist memory + persona + threads across restarts.
+  MONGO_URI: z.string().optional(),
+  MONGO_DB_NAME: z.string().default('2in'),
+
   // Chain (TwinINFT). Without CHAIN_CONTRACT_ADDRESS, /api/chain/* serves
   // mock state so the demo works without a deployed contract.
   CHAIN_CONTRACT_ADDRESS: z.string().regex(/^0x[a-fA-F0-9]{40}$/).optional(),
