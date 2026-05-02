@@ -98,22 +98,18 @@ Reply with ONLY the numbered list. Nothing else.`,
   'daily-post': {
     id: 'daily-post',
     title: 'daily-post',
-    description: 'Quick draft → editor gate. For everyday posts, replies, captions.',
+    description: 'Single Writer step. For everyday posts, replies, captions. Writer reads voice/procedural memory itself; the dedicated Editor gate is reserved for higher-stakes patterns (sponsor-reply, dm-reply).',
     steps: [
       {
         idx: 1, agent: 'writer', label: 'Draft in your voice',
         tools: [{ name: 'read_memory', args: { slice: 'voice', limit: 10 } }],
-      },
-      {
-        idx: 2, agent: 'editor', label: 'Final pass',
-        tools: [{ name: 'search_memory', args: { slice: 'rejection', query: 'pattern' } }],
       },
     ],
   },
   'with-research': {
     id: 'with-research',
     title: 'with-research',
-    description: 'Researcher pulls facts → Writer drafts → Editor gates. For posts about specific topics, people, events.',
+    description: 'Researcher pulls facts → Writer drafts. For posts about specific topics, people, events. Writer self-gates against procedural memory.',
     steps: [
       {
         idx: 1, agent: 'researcher', label: 'Pull facts + audience overlap',
@@ -122,10 +118,6 @@ Reply with ONLY the numbered list. Nothing else.`,
       {
         idx: 2, agent: 'writer', label: 'Draft in your voice',
         tools: [{ name: 'read_memory', args: { slice: 'voice', limit: 10 } }],
-      },
-      {
-        idx: 3, agent: 'editor', label: 'Final pass',
-        tools: [{ name: 'search_memory', args: { slice: 'rejection', query: 'pattern' } }],
       },
     ],
   },
@@ -189,7 +181,7 @@ Reply with ONLY the numbered list. Nothing else.`,
   'visual-post': {
     id: 'visual-post',
     title: 'visual-post',
-    description: 'Visual generates image → Writer writes caption → Editor gates.',
+    description: 'Visual generates image → Writer writes caption. For new image-led posts. Writer self-gates against voice/procedural memory.',
     steps: [
       {
         idx: 1, agent: 'visual', label: 'Generate image prompt',
@@ -199,8 +191,6 @@ Reply with ONLY the numbered list. Nothing else.`,
         idx: 2, agent: 'writer', label: 'Caption in your voice',
         tools: [{ name: 'read_memory', args: { slice: 'voice', limit: 10 } }],
       },
-      {
-        idx: 3, agent: 'editor', label: 'Gate' },
     ],
   },
   'sponsor-reply': {

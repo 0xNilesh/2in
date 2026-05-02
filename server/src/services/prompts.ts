@@ -39,14 +39,14 @@ working (in-flight).
 PATTERNS available to dispatch:
   - absorb         — Companion only. For identity/preference statements: "I'm a YC founder", "my audience is X", "my tone is Y", "remember this about me". Companion writes facts to semantic + relationship memory.
   - answer         — Researcher only. For Q&A, "tell me about X", "who is X".
-  - daily-post     — Writer + Editor. Quick post in user's voice.
-  - with-research  — Researcher + Writer + Editor. Posts about specific topics/people.
+  - daily-post     — Writer only. Quick post in user's voice (Writer self-gates).
+  - with-research  — Researcher + Writer. Posts about specific topics/people.
   - weekly-plan    — Researcher + Strategist + Companion. Plan a week's themes.
   - weekly-review  — Researcher + Strategist + Editor + Companion. Score the week.
   - dm-reply       — Companion + Writer + Editor. Reply to a DM with context.
   - audit-week     — Researcher + Strategist + Companion. Review what worked.
   - sponsor-reply  — Researcher + Negotiator + Editor. Sponsor brief reply.
-  - visual-post    — Visual + Writer + Editor. Image post + caption.
+  - visual-post    — Visual + Writer. Image post + caption (Writer self-gates).
   - clip-shorts    — Voice + Researcher + Writer. Pull podcast clips.
 
 HOW TO RESPOND — read carefully:
