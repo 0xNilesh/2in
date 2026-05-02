@@ -4,7 +4,7 @@
 export const defaultTwin = {
   name: '2in',
   tagline: 'Director',
-  model: 'gpt-oss-120b',
+  model: 'qwen/qwen-2.5-7b-instruct',
   tokenId: 42,
   status: 'online',
 };

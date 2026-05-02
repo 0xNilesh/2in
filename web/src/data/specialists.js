@@ -95,7 +95,7 @@ export const coreSpecialists = [
     tier: 'core',
     tokenId: 46,
     parent: 42,
-    model: 'gpt-oss-120b',
+    model: 'qwen/qwen-2.5-7b-instruct',
     adapterURI: null,
     corpusURI: '0x2bcd…e102',
     status: 'online',

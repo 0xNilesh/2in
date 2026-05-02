@@ -748,7 +748,7 @@ function Name({ twinName, setTwinName, twitter }) {
           </div>
           <div style={{ marginTop: 8, fontSize: 16 }}>
             <span style={{ color: 'var(--peach)', fontWeight: 600 }}>{twinName}</span>
-            <span style={{ color: 'var(--text-mute)' }}> · master twin · gpt-oss-120b</span>
+            <span style={{ color: 'var(--text-mute)' }}> · master twin · qwen-2.5-7b</span>
           </div>
           {twitter?.handle ? (
             <div
@@ -802,15 +802,14 @@ function Mint({ twinName, twitter, walletAddress }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signerReady]);
 
+  // Per-specialist subtitle. Pulls from ROSTER's trainedOn field (which is
+  // already specialist-specific) and substitutes the live tweet count for
+  // the Writer when an archive was ingested.
   const subTextFor = (r) => {
     if (r.id === 'master') return `mint() → tokenId ${r.tokenId ? `#${r.tokenId}` : '…'}`;
-    const what = r.id === 'quill'
-      ? `trained on ${tweetsTrained} tweets`
-      : r.id === 'cadence'
-        ? 'awaiting podcast feed'
-        : r.id === 'mantle'
-          ? 'awaiting contracts'
-          : 'trained on rejection_memory';
+    const what = r.id === 'writer' && tweetsTrained
+      ? `trained on ${tweetsTrained} tweets · ${r.trainedOn}`
+      : `trained on ${r.trainedOn ?? 'memory'}`;
     const target = r.tokenId ? `#${r.tokenId}` : '…';
     return `iCloneFrom · ${what} → tokenId ${target}`;
   };

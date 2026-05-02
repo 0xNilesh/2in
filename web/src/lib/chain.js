@@ -118,9 +118,13 @@ async function realWrite({ signer, functionName, args, extractTokenId }) {
     chain: galileo,
   });
   // Wait for confirmation, then decode TwinMinted event for tokenId.
-  const receipt = await client.waitForTransactionReceipt({ hash: txHash });
+  // Galileo's RPC sometimes lags receipt indexing — viem's
+  // waitForTransactionReceipt then errors with "no matching receipts found"
+  // even though the tx confirmed. Wrap with our own polling loop that's
+  // tolerant of the empty-receipt window. Up to 60s, polling every 2s.
+  const receipt = await pollReceipt(client, txHash);
   let tokenId = null;
-  if (extractTokenId) {
+  if (extractTokenId && receipt) {
     // Decode the first TwinMinted log we own
     const { decodeEventLog } = await import('viem');
     for (const log of receipt.logs) {
@@ -141,6 +145,40 @@ async function realWrite({ signer, functionName, args, extractTokenId }) {
     status: 'confirmed',
     explorerUrl: getExplorerTxUrl(txHash),
   };
+}
+
+// Poll for a receipt with manual retries. Galileo's RPC frequently returns
+// the cryptic "no matching receipts found: this may indicate potential
+// data corruption" error for several seconds AFTER a tx is actually mined.
+// We swallow that specific error and retry, falling through only on
+// genuine timeouts.
+async function pollReceipt(client, txHash, { maxMs = 60_000, intervalMs = 2_000 } = {}) {
+  const deadline = Date.now() + maxMs;
+  let lastErr = null;
+  while (Date.now() < deadline) {
+    try {
+      const r = await client.getTransactionReceipt({ hash: txHash });
+      if (r) return r;
+    } catch (err) {
+      lastErr = err;
+      const msg = String(err?.message ?? '').toLowerCase();
+      // Swallow the known transient errors; rethrow only if we hit something
+      // genuinely structural.
+      if (
+        !msg.includes('no matching receipts') &&
+        !msg.includes('not found') &&
+        !msg.includes('invalid parameters') &&
+        !msg.includes('data corruption')
+      ) {
+        throw err;
+      }
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  // Last resort: try once more without the swallow so the user sees a real
+  // error if something is genuinely wrong.
+  if (lastErr) throw lastErr;
+  throw new Error(`Tx ${txHash} not confirmed after ${Math.floor(maxMs / 1000)}s`);
 }
 
 // === mock path ======================================================
