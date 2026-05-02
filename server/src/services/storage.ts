@@ -17,6 +17,9 @@
 // the UI can show "in-memory" badges if needed.
 
 import crypto from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { tmpdir } from 'node:os';
 import { config } from '../config.js';
 
 export interface UploadResult {
@@ -37,10 +40,55 @@ export interface StorageMode {
   reason?: string;
 }
 
+// Disk mirror for the in-memory KV mock — survives server restarts so users
+// don't lose memory entries every dev reload. Lives next to the upload dir.
+const KV_PERSIST_PATH = join(tmpdir(), '2in-kv-state.json');
+
+function loadKvFromDisk(): Map<string, Map<string, KvEntry>> {
+  const out = new Map<string, Map<string, KvEntry>>();
+  try {
+    if (!existsSync(KV_PERSIST_PATH)) return out;
+    const raw = readFileSync(KV_PERSIST_PATH, 'utf8');
+    const obj = JSON.parse(raw) as Record<string, KvEntry[]>;
+    for (const [stream, entries] of Object.entries(obj)) {
+      const bucket = new Map<string, KvEntry>();
+      for (const e of entries) bucket.set(e.key, e);
+      out.set(stream, bucket);
+    }
+  } catch {
+    // Corrupt or missing — start empty.
+  }
+  return out;
+}
+
+let pendingFlush: NodeJS.Timeout | null = null;
+function flushKvToDisk(kv: Map<string, Map<string, KvEntry>>): void {
+  // Coalesce writes — if many calls land in the same tick, only the last
+  // one survives, and we still hit disk soon enough that crash recovery
+  // loses at most ~250ms of writes.
+  if (pendingFlush) clearTimeout(pendingFlush);
+  pendingFlush = setTimeout(() => {
+    pendingFlush = null;
+    try {
+      const obj: Record<string, KvEntry[]> = {};
+      for (const [stream, bucket] of kv) {
+        obj[stream] = Array.from(bucket.values());
+      }
+      const dir = dirname(KV_PERSIST_PATH);
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      writeFileSync(KV_PERSIST_PATH, JSON.stringify(obj));
+    } catch {
+      // Disk full / read-only — silent. The in-memory copy still works.
+    }
+  }, 250);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (pendingFlush as any).unref?.();
+}
+
 class StorageService {
   private indexerPromise: Promise<unknown> | null = null;
   private mockBlobs = new Map<string, Buffer>();
-  private mockKv = new Map<string, Map<string, KvEntry>>();
+  private mockKv = loadKvFromDisk();
 
   get mode(): StorageMode {
     if (config.STORAGE_PRIVATE_KEY) {
@@ -73,7 +121,7 @@ class StorageService {
     return this.realDownload(rootHash);
   }
 
-  // === KV (in-memory mirror for now) ============================
+  // === KV (in-memory mirror, disk-persisted) ====================
   async writeKv(stream: string, key: string, value: string): Promise<void> {
     let bucket = this.mockKv.get(stream);
     if (!bucket) {
@@ -81,6 +129,7 @@ class StorageService {
       this.mockKv.set(stream, bucket);
     }
     bucket.set(key, { key, value, ts: Date.now() });
+    flushKvToDisk(this.mockKv);
   }
 
   async readKv(stream: string, key: string): Promise<string | null> {
@@ -91,13 +140,11 @@ class StorageService {
     return Array.from(this.mockKv.get(stream)?.values() ?? []).sort((a, b) => b.ts - a.ts);
   }
 
-  // Read-modify-write helper. Returns the merged value if the key existed,
-  // null otherwise. Caller controls merge semantics by passing the merged
-  // string directly.
   async updateKv(stream: string, key: string, value: string): Promise<boolean> {
     const bucket = this.mockKv.get(stream);
     if (!bucket || !bucket.has(key)) return false;
     bucket.set(key, { key, value, ts: Date.now() });
+    flushKvToDisk(this.mockKv);
     return true;
   }
 
@@ -105,6 +152,7 @@ class StorageService {
     const bucket = this.mockKv.get(stream);
     if (!bucket || !bucket.has(key)) return false;
     bucket.delete(key);
+    flushKvToDisk(this.mockKv);
     return true;
   }
 

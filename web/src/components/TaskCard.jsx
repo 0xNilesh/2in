@@ -41,16 +41,22 @@ export function TaskCard({ taskId }) {
     if (live.meta) {
       const steps = Object.values(live.steps).sort((a, b) => a.idx - b.idx);
       const totalSteps = live.meta.totalSteps ?? steps.length;
+      // If the server forgot this task (restart), keep the cached state
+      // visible but tag the status so it doesn't pretend to still be live.
+      const dropped = live.serverDropped;
+      const status = dropped && live.status !== 'awaiting-approval' && live.status !== 'approved'
+        ? 'archived'
+        : live.status ?? 'pending';
       return {
         title: live.meta.title ?? 'Task',
         pattern: live.meta.pattern ?? '—',
-        status: live.status ?? 'pending',
+        status,
         steps,
         current: live.currentStep || steps.length,
         total: totalSteps,
         elapsed: null,
         cost: live.cost ?? null,
-        source: 'live',
+        source: dropped ? 'cached' : 'live',
       };
     }
     if (seed) {
@@ -64,6 +70,21 @@ export function TaskCard({ taskId }) {
         elapsed: seed.elapsed,
         cost: seed.cost,
         source: 'seed',
+      };
+    }
+    // Server doesn't know this taskId AND we have no cached snapshot AND
+    // no seed match — almost certainly an orphan from a wiped restart.
+    if (live.serverDropped) {
+      return {
+        title: 'Task expired',
+        pattern: '—',
+        status: 'archived',
+        steps: [],
+        current: 0,
+        total: 0,
+        elapsed: null,
+        cost: null,
+        source: 'expired',
       };
     }
     return {
@@ -91,6 +112,8 @@ export function TaskCard({ taskId }) {
           <div className="task-card-sub">
             pattern · <code>{view.pattern}</code>
             {view.source === 'live' ? <span style={{ marginLeft: 8, color: 'var(--peach)' }}>● live</span> : null}
+            {view.source === 'cached' ? <span style={{ marginLeft: 8, color: 'var(--text-faint)' }}>cached · server lost it</span> : null}
+            {view.source === 'expired' ? <span style={{ marginLeft: 8, color: 'var(--text-faint)' }}>server restart cleared this task</span> : null}
           </div>
         </div>
         <StatusPill color={stateColor[view.status] ?? 'muted'}>{view.status}</StatusPill>
