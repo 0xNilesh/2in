@@ -11,6 +11,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { PageHeader } from '../components/PageHeader.jsx';
 import { StatusPill } from '../components/StatusPill.jsx';
 import { toolsApi, uploadApi } from '../lib/api.js';
+import {
+  MAINNET_REQUIRED_TOOLS,
+  MAINNET_PENDING_TOOLS,
+  mainnetModelFor,
+} from '../data/mainnet-tools.js';
 
 const CATEGORY_LABELS = {
   memory: 'Memory',
@@ -32,7 +37,13 @@ export default function Tools() {
     let cancelled = false;
     setLoading(true);
     toolsApi.list()
-      .then((res) => { if (!cancelled) setTools(res.tools ?? []); })
+      .then((res) => {
+        if (cancelled) return;
+        // Append the mainnet-pending entries so they share the same
+        // category-grouped layout as the live tools. Disabled rendering
+        // is handled inside ToolCard.
+        setTools([...(res.tools ?? []), ...MAINNET_PENDING_TOOLS]);
+      })
       .catch((err) => { if (!cancelled) setError(err.message ?? 'fetch_failed'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -62,7 +73,7 @@ export default function Tools() {
     <>
       <PageHeader
         title="Tools"
-        sub={`${tools.length} live tools — call any from here. Video + image edits run via the bundled ffmpeg binary; LLM tools route through 0G compute.`}
+        sub={`${tools.length - MAINNET_PENDING_TOOLS.length} testnet-live · ${MAINNET_PENDING_TOOLS.length + MAINNET_REQUIRED_TOOLS.size} pending mainnet provider. Image + video run via bundled ffmpeg; chat tools route through 0G compute.`}
       />
       <div className="scroll">
         <div className="page">
@@ -112,8 +123,19 @@ function ToolCard({ tool }) {
   const [values, setValues] = useState(() => initialValuesFromSchema(tool.input));
   const [startedAt, setStartedAt] = useState(null);
 
+  // Two disabled states share the same look:
+  //   - pending: the tool doesn't exist locally; it's a mainnet-only model
+  //     we'd want to expose once the provider is wired
+  //   - gated: the tool exists locally but its underlying 0G compute model
+  //     isn't on testnet (vision, image-gen, whisper)
+  const isPending = Boolean(tool._pending);
+  const isGated = !isPending && MAINNET_REQUIRED_TOOLS.has(tool.name);
+  const disabled = isPending || isGated;
+  const mainnetModel = isPending ? tool._model : (isGated ? mainnetModelFor(tool.name) : null);
+
   const submit = async (e) => {
     e?.preventDefault?.();
+    if (disabled) return;
     setBusy(true);
     setErr(null);
     setResult(null);
@@ -130,28 +152,57 @@ function ToolCard({ tool }) {
   };
 
   return (
-    <div className="card" style={{ padding: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+    <div
+      className="card"
+      style={{
+        padding: 14,
+        opacity: disabled ? 0.7 : 1,
+        position: 'relative',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <code style={{
-          background: 'var(--peach-10)', color: 'var(--peach)',
+          background: disabled ? 'rgba(255,255,255,0.04)' : 'var(--peach-10)',
+          color: disabled ? 'var(--text-mute)' : 'var(--peach)',
           padding: '2px 8px', borderRadius: 6,
           fontFamily: 'Geist Mono, monospace', fontSize: 12.5, fontWeight: 500,
         }}>{tool.name}</code>
-        <StatusPill color="mint">live</StatusPill>
+        {disabled
+          ? <StatusPill color="amber">needs 0G mainnet · soon</StatusPill>
+          : <StatusPill color="mint">live</StatusPill>}
       </div>
 
       <div className="card-sub" style={{ marginTop: 8 }}>{tool.description}</div>
 
+      {mainnetModel ? (
+        <div style={{
+          marginTop: 8,
+          fontSize: 11,
+          color: 'var(--text-faint)',
+          fontFamily: 'Geist Mono, monospace',
+          lineHeight: 1.55,
+        }}>
+          model · <span style={{ color: 'var(--text-mute)' }}>{mainnetModel}</span>
+          {tool._pricing ? <><br/>price · {tool._pricing}</> : null}
+        </div>
+      ) : null}
+
       <button
         type="button"
         className="btn"
-        style={{ marginTop: 10 }}
-        onClick={() => setOpen((o) => !o)}
+        style={{
+          marginTop: 10,
+          opacity: disabled ? 0.5 : 1,
+          cursor: disabled ? 'not-allowed' : 'pointer',
+        }}
+        onClick={() => !disabled && setOpen((o) => !o)}
+        disabled={disabled}
+        title={disabled ? 'Coming on 0G mainnet — provider not yet on Galileo testnet' : ''}
       >
-        {open ? '— Hide' : '＋ Try it'}
+        {disabled ? 'Try (soon)' : (open ? '— Hide' : '＋ Try it')}
       </button>
 
-      {open ? (
+      {open && !disabled ? (
         <form onSubmit={submit} style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
           {fieldsFromSchema(tool.input).map((f) => (
             <Field
