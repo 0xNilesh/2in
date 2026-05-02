@@ -18,6 +18,7 @@ import { z } from 'zod';
 import { compute, type ChatMessage } from '../services/compute.js';
 import { systemPrompt, type AgentRole } from '../services/prompts.js';
 import { sseStream, setSseHeaders, type SseStream } from '../lib/sse.js';
+import { retrieve as memoryRetrieve, MEMORY_TYPES, type MemoryEntry } from '../services/memory.js';
 
 const TwinCtx = z.object({
   name: z.string().optional(),
@@ -32,6 +33,17 @@ const ChatBody = z.object({
   })).min(1),
   twin: TwinCtx,
   model: z.string().optional(),
+  // Optional client-cached summary of older turns when the thread has grown
+  // past the recent-turn cap. Avoids losing early context without sending
+  // every message every turn.
+  summary: z.string().max(2000).optional(),
+});
+
+const SummarizeBody = z.object({
+  messages: z.array(z.object({
+    role: z.enum(['system', 'user', 'assistant']),
+    content: z.string(),
+  })).min(2),
 });
 
 const SPECIALISTS: AgentRole[] = ['writer', 'researcher', 'editor', 'strategist', 'companion', 'voice', 'visual', 'negotiator'];
@@ -45,7 +57,7 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/chat/director', async (req, reply) => {
     const body = ChatBody.parse(req.body);
-    const messages = withSystem('director', body.messages, ctxFrom(body.twin));
+    const messages = await withSystem('director', body.messages, ctxFrom(body.twin), body.summary);
     return streamChat(reply, messages, body.model);
   });
 
@@ -55,8 +67,40 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       throw app.httpErrors.badRequest(`Unknown specialist: ${id}`);
     }
     const body = ChatBody.parse(req.body);
-    const messages = withSystem(id, body.messages, ctxFrom(body.twin));
+    const messages = await withSystem(id, body.messages, ctxFrom(body.twin), body.summary);
     return streamChat(reply, messages, body.model);
+  });
+
+  // Conversation summarizer — frontend calls this when a thread grows past
+  // the recent-turn cap, caches the result client-side, then sends it on
+  // subsequent chat requests as `summary`. One small Qwen call returns 1-3
+  // sentences capturing the gist of older turns so context isn't lost.
+  app.post('/chat/summarize', async (req) => {
+    const body = SummarizeBody.parse(req.body);
+    const transcript = body.messages
+      .map((m) => `${m.role === 'user' ? 'User' : 'Director'}: ${m.content}`)
+      .join('\n\n');
+    const sys = `You compress a chat transcript into a 1-3 sentence summary capturing what was discussed, decisions made, and outstanding context. Reply with the summary text only — no preamble, no quoting, no headings. Max 200 words.`;
+    let summary = '';
+    try {
+      const j = await compute.completionRaw(
+        {
+          messages: [
+            { role: 'system', content: sys },
+            { role: 'user', content: transcript.slice(0, 4000) },
+          ],
+          temperature: 0.2,
+          max_tokens: 250,
+        },
+        { timeoutMs: 8000 },
+      ) as { choices?: Array<{ message?: { content?: string } }> };
+      summary = (j.choices?.[0]?.message?.content ?? '').trim();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(`[chat/summarize] failed: ${(err as Error).message}`);
+      summary = '';
+    }
+    return { summary };
   });
 }
 
@@ -68,16 +112,20 @@ function ctxFrom(twin: z.infer<typeof TwinCtx>) {
   };
 }
 
-// Max prior turns we keep in context (excluding system + the new user msg).
-// 7B models overfit to repeated patterns when they see >3 of the same shape;
-// trim aggressively so a stale extension can't ossify the response.
-const HISTORY_TURN_CAP = 6;
+// Max recent turns we keep verbatim (excluding system). Older turns get
+// folded into a client-cached summary instead so we don't lose early
+// context as the thread grows.
+const HISTORY_TURN_CAP = 10;
+// Max memory entries we'll inject into a chat call as RAG context. Keeps
+// the prompt bounded while letting cross-thread facts surface.
+const MEMORY_CONTEXT_LIMIT = 5;
 
-function withSystem(
+async function withSystem(
   role: AgentRole,
   history: ChatMessage[],
   ctx: { twinName: string; twitterHandle?: string | null; walletAddress?: string | null },
-): ChatMessage[] {
+  summary?: string,
+): Promise<ChatMessage[]> {
   let sys = systemPrompt(role, ctx);
   // Strip any client-supplied system message — the server controls the role.
   const filtered = history[0]?.role === 'system' ? history.slice(1) : history;
@@ -95,7 +143,47 @@ function withSystem(
     }
   }
 
-  return [{ role: 'system', content: sys }, ...recent];
+  const out: ChatMessage[] = [{ role: 'system', content: sys }];
+
+  // RAG-style memory retrieval — query memory with the latest user message
+  // and prepend the top matches as context. This is what makes cross-thread
+  // pollination work: a fact written in Thread A's tasks becomes visible
+  // when referenced from Thread B's chat.
+  const lastUser = [...recent].reverse().find((m) => m.role === 'user');
+  if (lastUser?.content) {
+    try {
+      const hits = await memoryRetrieve({
+        types: [...MEMORY_TYPES].filter((t) => t !== 'working'),
+        query: lastUser.content,
+        limit: MEMORY_CONTEXT_LIMIT,
+        twinId: '42',
+      });
+      if (hits.length > 0) {
+        out.push({
+          role: 'user',
+          content: memoryContextLine(hits),
+        });
+      }
+    } catch {
+      // Memory unavailable — proceed without it. Not worth blocking chat.
+    }
+  }
+
+  // Older-context summary, if the client cached one.
+  if (summary && summary.trim()) {
+    out.push({
+      role: 'user',
+      content: `Earlier in this thread (summary):\n${summary.trim()}`,
+    });
+  }
+
+  out.push(...recent);
+  return out;
+}
+
+function memoryContextLine(hits: MemoryEntry[]): string {
+  const lines = hits.map((e) => `- [${e.type}] ${e.text}${e.source ? ` (${e.source})` : ''}`).join('\n');
+  return `Relevant memory you've accumulated about the user (use only if helpful):\n${lines}`;
 }
 
 const ATTACHMENT_GUIDANCE = `

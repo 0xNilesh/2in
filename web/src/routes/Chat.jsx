@@ -15,6 +15,7 @@ import { Avatar } from '../components/Avatar.jsx';
 import { useTwin } from '../hooks/useTwin.js';
 import { useStreamingChat } from '../hooks/useStreamingChat.js';
 import { useThreads, getThreadSync, deriveTitle } from '../hooks/useThreads.js';
+import { useThreadSummary } from '../hooks/useThreadSummary.js';
 import { ROUTES } from '../lib/routes.js';
 import { taskApi, memoryApi, chatApi, toolsApi } from '../lib/api.js';
 import { pushToast } from '../hooks/useToasts.js';
@@ -113,6 +114,19 @@ function ChatBody({ threadId, twin, seed, thread, onRename, onTouch, onNewChat, 
 
   const allMessages = useMemo(() => [...seed.messages, ...extension], [seed.messages, extension]);
 
+  // Long-thread summary cache. When the conversation grows past ~12 turns,
+  // this hook computes a summary of the older portion (server-side via
+  // /api/chat/summarize) and caches it in localStorage per thread. We send
+  // the summary on every chat + spawn so early framing isn't lost when the
+  // 10-message recent cap drops older turns.
+  const apiMessages = useMemo(
+    () => allMessages
+      .filter((m) => m.kind === 'user' || (m.kind === 'agent' && m.from === 'director'))
+      .map((m) => toApiMessage(m)),
+    [allMessages],
+  );
+  const threadSummary = useThreadSummary(threadId, apiMessages);
+
   // When streaming finishes, commit the partial as a message AND — if the
   // user attached files — run the matched media tool unconditionally.
   // We don't wait for the dispatch-verb detector here because the
@@ -179,7 +193,7 @@ function ChatBody({ threadId, twin, seed, thread, onRename, onTouch, onNewChat, 
 
         // Normal pattern dispatch (no attachment in this turn).
         const explicitPattern = taskCue === '__auto__' ? undefined : taskCue;
-        const { taskId } = await taskApi.spawn(goal, twin, explicitPattern, chatHistory);
+        const { taskId } = await taskApi.spawn(goal, twin, explicitPattern, chatHistory, threadSummary);
         setExtension((ext) => [
           ...ext,
           {
@@ -248,7 +262,7 @@ function ChatBody({ threadId, twin, seed, thread, onRename, onTouch, onNewChat, 
     lastTaskCueRef.current = null;
     // Stash attachments so taskCue handler can pass them to the spawn.
     pendingAttachmentsRef.current = attachments;
-    send(history, { twin });
+    send(history, { twin, summary: threadSummary });
   };
 
   return (

@@ -44,15 +44,21 @@ export const healthApi = {
 
 export const chatApi = {
   mode: () => fetch(url('/api/chat/mode')).then(unwrap),
+  summarize: (messages) =>
+    fetch(url('/api/chat/summarize'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages }),
+    }).then(unwrap),
 };
 
 export const taskApi = {
   patterns: () => fetch(url('/api/task/patterns')).then(unwrap),
-  spawn: (goal, twin, pattern, chatHistory) =>
+  spawn: (goal, twin, pattern, chatHistory, summary) =>
     fetch(url('/api/task'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ goal, twin, pattern, chatHistory }),
+      body: JSON.stringify({ goal, twin, pattern, chatHistory, summary }),
     }).then(unwrap),
 };
 

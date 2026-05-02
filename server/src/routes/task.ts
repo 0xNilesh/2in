@@ -28,6 +28,8 @@ const SpawnBody = z.object({
     role: z.enum(['user', 'assistant']),
     content: z.string().max(2000),
   })).max(20).optional(),
+  // Client-cached summary of older turns when the thread is long.
+  summary: z.string().max(2000).optional(),
 });
 
 export async function taskRoutes(app: FastifyInstance): Promise<void> {
@@ -41,12 +43,13 @@ export async function taskRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/task', async (req) => {
     const body = SpawnBody.parse(req.body);
-    // Trim history to the last 6 turns server-side as a guard.
-    const chatHistory = (body.chatHistory ?? []).slice(-6);
+    // Trim history to the last 8 turns server-side as a guard.
+    const chatHistory = (body.chatHistory ?? []).slice(-8);
     return spawnTask({
       goal: body.goal,
       pattern: body.pattern,
       chatHistory,
+      summary: body.summary,
       context: {
         twinName: body.twin?.name ?? '2in',
         twitterHandle: body.twin?.twitterHandle ?? null,

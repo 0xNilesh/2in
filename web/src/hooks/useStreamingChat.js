@@ -24,7 +24,7 @@ export function useStreamingChat({ target = 'director' } = {}) {
     setIsStreaming(false);
   }, []);
 
-  const send = useCallback((messages, { twin, model } = {}) => {
+  const send = useCallback((messages, { twin, model, summary } = {}) => {
     stop();
     setPartial('');
     setError(null);
@@ -37,7 +37,7 @@ export function useStreamingChat({ target = 'director' } = {}) {
         : `/api/chat/specialist/${target}`;
 
     let acc = '';
-    const channel = ssePost(url, { messages, twin, model });
+    const channel = ssePost(url, { messages, twin, model, summary });
     channelRef.current = channel;
 
     channel.onEvent('token', ({ delta }) => {

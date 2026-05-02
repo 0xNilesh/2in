@@ -353,6 +353,9 @@ export interface SpawnTaskInput {
    *  Specialists see this as prior conversational context so references
    *  like "shorter" or "in 200 words" resolve to the actual prior topic. */
   chatHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+  /** Client-cached summary of older turns. Prepended before chatHistory
+   *  so a long conversation doesn't lose its early framing. */
+  summary?: string;
 }
 
 export interface SpawnTaskResult {
@@ -597,6 +600,14 @@ function buildMessages(
 ): ChatMessage[] {
   const sys = systemOverride ?? systemPrompt(agent, input.context);
   const messages: ChatMessage[] = [{ role: 'system', content: sys }];
+
+  // Older-context summary, if provided.
+  if (input.summary && input.summary.trim()) {
+    messages.push({
+      role: 'user',
+      content: `Earlier in this thread (summary):\n${input.summary.trim()}`,
+    });
+  }
 
   // Conversational context — prior turns from the originating chat thread.
   // Lets the specialist resolve references like "in 200 words", "shorter",
