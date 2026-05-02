@@ -37,6 +37,7 @@ export async function taskRoutes(app: FastifyInstance): Promise<void> {
     patterns: Object.values(PATTERNS).map((p) => ({
       id: p.id,
       title: p.title,
+      description: p.description,
       steps: p.steps.map((s) => ({ idx: s.idx, agent: s.agent, label: s.label })),
     })),
   }));
