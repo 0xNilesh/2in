@@ -125,12 +125,6 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
     const include = ((req.query as { include?: string })?.include ?? 'outputs').toLowerCase();
     const entries = await readdir(UPLOAD_DIR);
     const files = entries
-      .filter((name) => {
-        const isOutput = name.startsWith('out-');
-        if (include === 'outputs') return isOutput;
-        if (include === 'uploads') return !isOutput;
-        return true; // 'all'
-      })
       .map((name) => {
         try {
           const s = statSync(join(UPLOAD_DIR, name));
@@ -141,13 +135,18 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
             url: publicUrl(req, name),
             kind: kindOf(name),
             ext: extname(name).slice(1).toLowerCase(),
-            origin: name.startsWith('out-') ? 'output' as const : 'upload' as const,
+            origin: classifyOrigin(name),
           };
         } catch {
           return null;
         }
       })
       .filter((f): f is NonNullable<typeof f> => f !== null)
+      .filter((f) => {
+        if (include === 'outputs') return f.origin !== 'upload';
+        if (include === 'uploads') return f.origin === 'upload';
+        return true;
+      })
       .sort((a, b) => b.mtime - a.mtime);
     const totalBytes = files.reduce((acc, f) => acc + f.sizeBytes, 0);
     return { files, count: files.length, totalBytes, include };
@@ -169,6 +168,22 @@ function kindOf(filename: string): 'image' | 'video' | 'audio' | 'other' {
   if (['mp4', 'mov', 'webm', 'mkv', 'avi'].includes(ext)) return 'video';
   if (['mp3', 'wav', 'm4a', 'ogg', 'flac'].includes(ext)) return 'audio';
   return 'other';
+}
+
+/** Classify a file's origin tolerantly:
+ *    out-*  → output (new prefix)
+ *    bare 12-char hex (sha1 slice)  → upload (POST /api/upload pattern)
+ *    anything else (incl. legacy 16-char hex) → output (treats pre-prefix tool
+ *                                                outputs as outputs so they
+ *                                                still appear in Library) */
+function classifyOrigin(filename: string): 'output' | 'upload' | 'legacy' {
+  if (filename.startsWith('out-')) return 'output';
+  const stem = filename.replace(/\.[^.]+$/, '');
+  // Bare 12-char hex stems came from POST /api/upload (createHash sha1, slice 12).
+  if (/^[a-f0-9]{12}$/.test(stem)) return 'upload';
+  // Pre-prefix tool outputs were 16-char randomBytes(8) hex; older still
+  // were arbitrary lengths. Either way, treat as output for visibility.
+  return 'legacy';
 }
 
 /** Resolve an http(s) URL OR a local upload URL into a local file path that
