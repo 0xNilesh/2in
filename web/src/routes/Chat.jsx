@@ -116,7 +116,12 @@ function ChatBody({ threadId, twin, seed, thread, onRename, onTouch, onNewChat, 
 
   const allMessages = useMemo(() => [...seed.messages, ...extension], [seed.messages, extension]);
 
-  // When streaming finishes, commit the partial as a message.
+  // When streaming finishes, commit the partial as a message AND — if the
+  // user attached files — run the matched media tool unconditionally.
+  // We don't wait for the dispatch-verb detector here because the
+  // attachment + user instruction are sufficient signal on their own; an
+  // attached image with "color the lizard white" should always edit, even
+  // if the director's prose doesn't contain a pattern keyword.
   useEffect(() => {
     if (isStreaming) return;
     if (!partial) return;
@@ -129,9 +134,21 @@ function ChatBody({ threadId, twin, seed, thread, onRename, onTouch, onNewChat, 
         body: { intro: [partial] },
       },
     ]);
-    // Clear the partial cache by sending a new empty stream is overkill;
-    // instead the next send() resets it. But to avoid double-commit we use
-    // a guard: clear local copy of partial via a ref.
+
+    // Attachment-driven tool dispatch — runs once per send.
+    const attachments = pendingAttachmentsRef.current ?? [];
+    if (attachments.length > 0) {
+      pendingAttachmentsRef.current = [];
+      const goalMsg = [...allMessages].reverse().find((m) => m.kind === 'user');
+      const goal = (goalMsg?.text && (Array.isArray(goalMsg.text) ? goalMsg.text.join(' ') : goalMsg.text)) ?? '';
+      const toolName = detectMediaToolFromIntent(goal, attachments);
+      if (toolName) {
+        // Mark cue handler as "consumed" so the taskCue effect doesn't
+        // also try to spawn a pattern for this turn.
+        lastTaskCueRef.current = '__attachment-handled__';
+        void runMediaTool(toolName, attachments[0], goal, setExtension);
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isStreaming]);
 
@@ -146,27 +163,16 @@ function ChatBody({ threadId, twin, seed, thread, onRename, onTouch, onNewChat, 
     if (isStreaming) return;
     lastTaskCueRef.current = taskCue;
 
+    // The attachment-finished branch above already consumed this turn;
+    // skip pattern dispatch so we don't double-fire on the same send.
+    if (taskCue === '__attachment-handled__') return;
+
     (async () => {
       try {
         const goalMsg = [...allMessages].reverse().find((m) => m.kind === 'user');
         const goal = (goalMsg?.text && (Array.isArray(goalMsg.text) ? goalMsg.text.join(' ') : goalMsg.text)) ?? 'unspecified';
-        const attachments = pendingAttachmentsRef.current ?? [];
-        pendingAttachmentsRef.current = [];
 
-        // Attachment present? The user's intent drives the tool — not the
-        // director's prose. We check the USER message text + the attachment
-        // kind. If that matches a media tool, run it directly and skip the
-        // pattern dispatch (visual-post would generate a NEW image, not
-        // edit the attached one).
-        if (attachments.length > 0) {
-          const toolName = detectMediaToolFromIntent(goal, attachments);
-          if (toolName) {
-            await runMediaTool(toolName, attachments[0], goal, setExtension);
-            return;
-          }
-        }
-
-        // Else: normal pattern dispatch.
+        // Normal pattern dispatch (no attachment in this turn).
         const explicitPattern = taskCue === '__auto__' ? undefined : taskCue;
         const { taskId } = await taskApi.spawn(goal, twin, explicitPattern);
         setExtension((ext) => [
@@ -182,7 +188,7 @@ function ChatBody({ threadId, twin, seed, thread, onRename, onTouch, onNewChat, 
         openTask(taskId);
       } catch (err) {
         // eslint-disable-next-line no-console
-        console.error('spawn task / tool run failed', err);
+        console.error('spawn task failed', err);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
