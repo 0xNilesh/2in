@@ -1,99 +1,258 @@
-// Personality questionnaire — 8 required + 2 optional questions. Submit
-// → POST /api/persona/from-questionnaire → seeds memory with role / tone /
-// audience / cadence / avoidances / goals / sample writing + idol traits.
+// Conversational onboarding interview. Feels like chatting with the
+// director — one question at a time, with chip shortcuts where useful and
+// natural progression instead of a wall of fields.
 //
-// Used in onboarding step 1 alongside the X-archive ingest path. Gives
-// users without a Twitter export a way to populate memory before their
-// first chat — and crucially, idol-based voice traits give the Writer
-// real style anchors without LoRA.
+// Each turn = an assistant question + the user's answer (text or chip
+// picks). Past turns scroll above; current question is the focal point.
+// Submit at the end seeds memory via /api/persona/from-questionnaire,
+// then renders a summary card.
 //
-// Draft answers persisted to the parent's onboarding state under
-// `questionnaire.answers` so refreshes don't blow away progress.
+// Question shape:
+//   { id, ask, hint?, kind, options?, max?, optional?, placeholder? }
+//
+// kind = 'text' | 'longtext' | 'chips' | 'chips+custom' | 'radio' | 'idols'
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { personaApi } from '../lib/api.js';
 
-const TONE_OPTIONS = [
-  'terse', 'warm', 'contrarian', 'technical',
-  'playful', 'philosophical', 'no hot takes', 'candid',
-];
-const AVOID_OPTIONS = [
-  'hot takes', 'jargon', 'superlatives',
-  'politics', 'hashtags', 'self-promotion',
-];
-const THEME_SUGGESTIONS = [
-  'engineering culture', 'founder rituals', 'bootstrap economics',
-  'product design', 'AI / ML', 'web3', 'open source',
-  'leadership', 'parenting', 'health', 'creativity',
-];
-const GOAL_OPTIONS = [
-  'grow audience', 'share knowledge', 'land deals',
-  'build in public', 'recruit', 'find collaborators',
-];
-const IDOL_SUGGESTIONS = [
-  'Naval Ravikant', 'Paul Graham', 'Sam Altman',
-  'Andrej Karpathy', 'Patrick Collison', 'Shaan Puri',
-  'David Perell', 'Jack Altman',
+// Single source of truth — re-order or rename here, the UI follows.
+const QUESTIONS = [
+  {
+    id: 'role',
+    ask: "Hey — let's get to know you a bit. What do you do?",
+    hint: "One line. Role + what you build or write about.",
+    kind: 'text',
+    placeholder: "YC founder building developer tools",
+  },
+  {
+    id: 'background',
+    ask: "Quick context — how'd you get here? What's your background or formative experience?",
+    hint: "A sentence or two. Optional but it helps your twin sound like you.",
+    kind: 'longtext',
+    optional: true,
+    placeholder: "Spent 8 years at infra startups before going indie. Got tired of building for VPs and started writing for engineers like me.",
+  },
+  {
+    id: 'audience',
+    ask: "Who do you write for?",
+    hint: "Be specific — '25-40 technical founders' beats 'tech people'.",
+    kind: 'text',
+    placeholder: "technical founders 25-40, mostly second-time builders",
+  },
+  {
+    id: 'antiAudience',
+    ask: "Who do you NOT want to attract?",
+    hint: "Helps the Editor catch tone drift toward the wrong crowd.",
+    kind: 'text',
+    optional: true,
+    placeholder: "growth-hackers, people who post hustle porn",
+  },
+  {
+    id: 'themes',
+    ask: "What topics do you cover most?",
+    hint: "Pick what fits, add your own. These become recurring themes the Researcher pulls from.",
+    kind: 'chips+custom',
+    options: ['engineering culture', 'founder rituals', 'bootstrap economics', 'product design', 'AI / ML', 'web3', 'open source', 'leadership', 'parenting', 'health'],
+    max: 8,
+  },
+  {
+    id: 'tone',
+    ask: "How would a friend describe your tone?",
+    hint: "Pick up to 3.",
+    kind: 'chips',
+    options: ['terse', 'warm', 'contrarian', 'technical', 'playful', 'philosophical', 'no hot takes', 'candid', 'self-deprecating', 'observant'],
+    max: 3,
+  },
+  {
+    id: 'sentenceLength',
+    ask: "Sentence length — what feels most like you?",
+    kind: 'radio',
+    options: [
+      { id: 'short', label: 'Short. Punchy. One line each.' },
+      { id: 'mixed', label: 'Mixed — short hooks, longer thoughts.' },
+      { id: 'long', label: 'Longer — comfortable with full paragraphs.' },
+    ],
+  },
+  {
+    id: 'framing',
+    ask: "When you write, do you lean more on stories or principles?",
+    kind: 'radio',
+    options: [
+      { id: 'story', label: 'Stories — I open with a moment or anecdote.' },
+      { id: 'principle', label: 'Principles — I open with the claim, then defend it.' },
+      { id: 'both', label: 'Both — depends on the day.' },
+    ],
+  },
+  {
+    id: 'humor',
+    ask: "What about humor?",
+    kind: 'radio',
+    options: [
+      { id: 'dry', label: 'Dry — straight-faced, occasionally pointed.' },
+      { id: 'playful', label: 'Playful — lightness, the occasional wink.' },
+      { id: 'edgy', label: 'Edgy — sharp, willing to make people uncomfortable.' },
+      { id: 'none', label: "Skip the humor — keep it serious." },
+    ],
+  },
+  {
+    id: 'avoid',
+    ask: "What would you kill from your own drafts? Things you refuse to write.",
+    hint: "Editor will gate against these.",
+    kind: 'chips+custom',
+    options: ['hot takes', 'jargon', 'superlatives', 'politics', 'hashtags', 'self-promotion', 'humblebrags', 'engagement bait'],
+    max: 8,
+  },
+  {
+    id: 'killWords',
+    ask: "Any specific words or phrases you'd cut on sight?",
+    hint: "Optional. Comma-separated. Things like 'literally', 'actually', 'unlock'.",
+    kind: 'text',
+    optional: true,
+    placeholder: "literally, actually, unlock, leverage, robust",
+  },
+  {
+    id: 'cadence',
+    ask: "Posting cadence?",
+    kind: 'radio',
+    options: [
+      { id: 'daily', label: 'Daily — every day or close.' },
+      { id: 'weekly', label: 'Weekly — a few times a week.' },
+      { id: 'when-inspired', label: 'When inspired — irregular, longer gaps.' },
+    ],
+  },
+  {
+    id: 'goals',
+    ask: "Why are you posting? What's the goal?",
+    kind: 'chips',
+    options: ['grow audience', 'share knowledge', 'land deals', 'build in public', 'recruit', 'find collaborators', 'stay visible', 'force-think out loud'],
+    max: 4,
+  },
+  {
+    id: 'idols',
+    ask: "Which creators' voice do you respect most? Name 2-5 — your twin will steal a little of their style.",
+    hint: "Pick the suggested ones or type your own. We extract their style as anchors for your Writer.",
+    kind: 'idols',
+    options: ['Naval Ravikant', 'Paul Graham', 'Sam Altman', 'Andrej Karpathy', 'Patrick Collison', 'Shaan Puri', 'David Perell', 'Jack Altman'],
+    max: 5,
+  },
+  {
+    id: 'samples',
+    ask: "Paste 1-3 of your own writing snippets that feel like 'you' — past tweets, an essay opening, a DM you nailed.",
+    hint: "Optional but huge. These become voice anchors the Writer reads on every draft.",
+    kind: 'samples',
+    optional: true,
+  },
+  {
+    id: 'currentObsession',
+    ask: "What are you obsessed with right now? What can't you stop thinking about?",
+    hint: "Helps Researcher prioritize relevant context.",
+    kind: 'longtext',
+    optional: true,
+    placeholder: "Trying to figure out why so few founders write well — and whether tooling can help.",
+  },
+  {
+    id: 'missing',
+    ask: "What do you wish more people in your space were talking about?",
+    hint: "Tells Strategist where the white space is.",
+    kind: 'text',
+    optional: true,
+    placeholder: "the boring middle 18 months of building, post-launch.",
+  },
+  {
+    id: 'helpMost',
+    ask: "Last one — what do you want this twin to help you with most?",
+    kind: 'longtext',
+    optional: true,
+    placeholder: "Drafting tweets in my voice, faster, without losing the contrarian edge.",
+  },
 ];
 
-const empty = {
-  role: '',
-  audience: '',
-  themes: [],
-  tone: [],
-  avoid: [],
-  cadence: 'weekly',
-  goals: [],
-  idols: [],
-  samples: ['', '', ''],
-  extra: '',
-};
+const empty = (() => {
+  const o = {};
+  for (const q of QUESTIONS) {
+    if (q.kind === 'chips' || q.kind === 'chips+custom') o[q.id] = [];
+    else if (q.kind === 'idols') o[q.id] = [];
+    else if (q.kind === 'samples') o[q.id] = ['', '', ''];
+    else if (q.kind === 'radio') o[q.id] = q.options[0]?.id ?? '';
+    else o[q.id] = '';
+  }
+  return o;
+})();
 
 export function Questionnaire({ initial, onChange, onComplete }) {
   const [answers, setAnswers] = useState(() => ({ ...empty, ...(initial?.answers ?? {}) }));
+  const [step, setStep] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(initial?.result ?? null);
+  const scrollRef = useRef(null);
 
-  const patch = (k, v) => {
-    const next = { ...answers, [k]: v };
+  // Auto-scroll the question column to bottom on step change so the new
+  // question is in view.
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+    }
+  }, [step]);
+
+  const current = QUESTIONS[step];
+  const total = QUESTIONS.length;
+
+  const patch = (id, v) => {
+    const next = { ...answers, [id]: v };
     setAnswers(next);
     onChange?.(next);
   };
 
-  const toggleChip = (key, val, max = 99) => {
-    const curr = answers[key] ?? [];
-    const has = curr.includes(val);
-    const next = has ? curr.filter((x) => x !== val) : (curr.length >= max ? curr : [...curr, val]);
-    patch(key, next);
+  const next = () => {
+    if (step < total - 1) setStep(step + 1);
+  };
+  const back = () => { if (step > 0) setStep(step - 1); };
+
+  const isAnswered = (q, val) => {
+    if (q.optional) return true;
+    if (q.kind === 'chips' || q.kind === 'chips+custom' || q.kind === 'idols') return Array.isArray(val) && val.length > 0;
+    if (q.kind === 'samples') return true; // optional anyway
+    if (q.kind === 'radio') return Boolean(val);
+    return Boolean(String(val ?? '').trim());
   };
 
-  const addChip = (key, val, max = 99) => {
-    const trimmed = String(val).trim();
-    if (!trimmed) return;
-    const curr = answers[key] ?? [];
-    if (curr.includes(trimmed) || curr.length >= max) return;
-    patch(key, [...curr, trimmed]);
-  };
-
-  const removeChip = (key, val) => {
-    patch(key, (answers[key] ?? []).filter((x) => x !== val));
-  };
-
-  const submit = async (e) => {
-    e?.preventDefault?.();
+  const submit = async () => {
     setError(null);
     setBusy(true);
     try {
-      // Filter out empty sample slots before sending.
-      const cleaned = {
-        ...answers,
-        samples: (answers.samples ?? []).map((s) => s.trim()).filter(Boolean),
-        idols: (answers.idols ?? []).filter(Boolean),
+      // Map this richer questionnaire onto the backend's expected shape.
+      // Extra fields are folded into the `extra` free-text field so the
+      // server seeds them as `semantic` notes.
+      const samples = (answers.samples ?? []).map((s) => s.trim()).filter(Boolean);
+      const killWords = String(answers.killWords ?? '').trim();
+      const extras = [
+        answers.background ? `background: ${answers.background}` : null,
+        answers.antiAudience ? `not for: ${answers.antiAudience}` : null,
+        answers.sentenceLength ? `sentence length: ${answers.sentenceLength}` : null,
+        answers.framing ? `framing: ${answers.framing}` : null,
+        answers.humor && answers.humor !== 'none' ? `humor: ${answers.humor}` : null,
+        killWords ? `kill words: ${killWords}` : null,
+        answers.currentObsession ? `obsessed with: ${answers.currentObsession}` : null,
+        answers.missing ? `wishes more people talked about: ${answers.missing}` : null,
+        answers.helpMost ? `wants twin to help with: ${answers.helpMost}` : null,
+      ].filter(Boolean).join(' · ');
+
+      const payload = {
+        role: answers.role,
+        audience: answers.audience,
+        themes: answers.themes,
+        tone: answers.tone,
+        avoid: answers.avoid,
+        cadence: answers.cadence,
+        goals: answers.goals,
+        idols: answers.idols,
+        samples,
+        extra: extras || undefined,
       };
-      const res = await personaApi.fromQuestionnaire(cleaned, { tokenId: '42' });
+      const res = await personaApi.fromQuestionnaire(payload, { tokenId: '42' });
       setResult(res);
-      onComplete?.({ answers: cleaned, result: res });
+      onComplete?.({ answers, result: res });
     } catch (err) {
       setError(err.message ?? 'Failed to submit');
     } finally {
@@ -101,125 +260,61 @@ export function Questionnaire({ initial, onChange, onComplete }) {
     }
   };
 
-  const valid = answers.role.trim() && answers.audience.trim();
+  if (result) return <SubmittedPanel result={result} />;
 
-  if (result) {
-    return <SubmittedPanel result={result} answers={answers} />;
-  }
+  // The conversation: render previous turns + current question.
+  const turns = QUESTIONS.slice(0, step + 1);
 
   return (
-    <form onSubmit={submit} className="quest" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <Field label="What do you do?" hint="One short sentence — role, what you build, what you're known for.">
-        <input
-          className="onboard-input"
-          value={answers.role}
-          onChange={(e) => patch('role', e.target.value)}
-          placeholder="YC founder building developer tools"
-          maxLength={200}
-        />
-      </Field>
-
-      <Field label="Who do you write for?" hint="Your audience — be specific.">
-        <input
-          className="onboard-input"
-          value={answers.audience}
-          onChange={(e) => patch('audience', e.target.value)}
-          placeholder="technical founders 25-40, mostly second-time builders"
-          maxLength={200}
-        />
-      </Field>
-
-      <Field label="Topics you cover" hint="Pick or add — these become your themes.">
-        <ChipGroup
-          options={THEME_SUGGESTIONS}
-          selected={answers.themes}
-          onToggle={(v) => toggleChip('themes', v, 8)}
-          allowCustom
-          onAddCustom={(v) => addChip('themes', v, 8)}
-        />
-      </Field>
-
-      <Field label="Tone" hint="Pick up to 3.">
-        <ChipGroup
-          options={TONE_OPTIONS}
-          selected={answers.tone}
-          onToggle={(v) => toggleChip('tone', v, 3)}
-        />
-      </Field>
-
-      <Field label="Things to avoid" hint="What you'd kill from your own drafts. Editor will gate these.">
-        <ChipGroup
-          options={AVOID_OPTIONS}
-          selected={answers.avoid}
-          onToggle={(v) => toggleChip('avoid', v, 8)}
-          allowCustom
-          onAddCustom={(v) => addChip('avoid', v, 8)}
-        />
-      </Field>
-
-      <Field label="Posting cadence">
-        <Radio
-          name="cadence"
-          value={answers.cadence}
-          options={[
-            { id: 'daily', label: 'Daily — every day or close' },
-            { id: 'weekly', label: 'Weekly — a few times a week' },
-            { id: 'when-inspired', label: 'When inspired — irregular' },
-          ]}
-          onChange={(v) => patch('cadence', v)}
-        />
-      </Field>
-
-      <Field label="Goals" hint="Why are you doing this?">
-        <ChipGroup
-          options={GOAL_OPTIONS}
-          selected={answers.goals}
-          onToggle={(v) => toggleChip('goals', v, 4)}
-        />
-      </Field>
-
-      <Field
-        label="Inspirations · idols"
-        hint="2-5 creators whose voice you respect — we extract their style as anchors for your Writer."
+    <div className="quest-conv" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          paddingBottom: 8,
+          borderBottom: '1px solid var(--border)',
+        }}
       >
-        <IdolPicker
-          selected={answers.idols}
-          onAdd={(v) => addChip('idols', v, 5)}
-          onRemove={(v) => removeChip('idols', v)}
-          suggestions={IDOL_SUGGESTIONS}
-        />
-      </Field>
-
-      <Field label="Sample writing" hint="Optional — paste 1-3 of your own snippets that sound like you.">
-        {[0, 1, 2].map((i) => (
-          <textarea
-            key={i}
-            className="onboard-input"
-            rows={2}
-            placeholder={i === 0 ? "e.g. 'The opposite of discipline isn't laziness. It's drift.'" : ''}
-            value={answers.samples[i] ?? ''}
-            onChange={(e) => {
-              const next = [...answers.samples];
-              next[i] = e.target.value;
-              patch('samples', next);
+        <span style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'Geist Mono, monospace' }}>
+          {step + 1} / {total}
+        </span>
+        <div style={{ flex: 1, height: 3, background: 'var(--bg)', borderRadius: 999, overflow: 'hidden' }}>
+          <div
+            style={{
+              width: `${((step + 1) / total) * 100}%`,
+              height: '100%',
+              background: 'var(--peach)',
+              transition: 'width 200ms ease',
             }}
-            maxLength={500}
-            style={{ marginTop: 6, padding: '8px 10px', resize: 'vertical' }}
+          />
+        </div>
+        {current?.optional ? (
+          <span style={{ fontSize: 10, color: 'var(--text-faint)' }}>optional · skippable</span>
+        ) : null}
+      </div>
+
+      <div
+        ref={scrollRef}
+        style={{
+          maxHeight: 460,
+          overflowY: 'auto',
+          padding: '4px 4px 4px 0',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 14,
+        }}
+      >
+        {turns.map((q, i) => (
+          <Turn
+            key={q.id}
+            q={q}
+            value={answers[q.id]}
+            isCurrent={i === step}
+            onChange={(v) => patch(q.id, v)}
           />
         ))}
-      </Field>
-
-      <Field label="Anything else?" hint="Optional — context, constraints, recent themes.">
-        <textarea
-          className="onboard-input"
-          rows={2}
-          value={answers.extra}
-          onChange={(e) => patch('extra', e.target.value)}
-          placeholder="Currently fundraising, no deal talk in public posts."
-          maxLength={500}
-          style={{ padding: '8px 10px', resize: 'vertical' }}
-        />
-      </Field>
+      </div>
 
       {error ? (
         <div style={{ color: 'var(--red)', fontSize: 12, padding: '6px 10px', background: 'rgba(255,80,80,0.06)', borderRadius: 6 }}>
@@ -227,52 +322,239 @@ export function Questionnaire({ initial, onChange, onComplete }) {
         </div>
       ) : null}
 
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 4 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 4, borderTop: '1px solid var(--border)' }}>
         <button
-          type="submit"
-          className="btn btn-peach"
-          disabled={!valid || busy}
-          style={{ opacity: !valid || busy ? 0.55 : 1 }}
+          type="button"
+          className="btn"
+          onClick={back}
+          disabled={step === 0 || busy}
+          style={{ opacity: step === 0 ? 0.5 : 1 }}
         >
-          {busy ? 'Seeding memory…' : 'Seed my twin →'}
+          ← Back
         </button>
-        <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>
-          {valid ? '~3s for whitelist idols, longer if any need Qwen extraction' : 'Fill role + audience to continue'}
+        <span style={{ flex: 1, fontSize: 11, color: 'var(--text-faint)' }}>
+          {step === total - 1
+            ? 'Last one — submit when ready.'
+            : current?.optional
+            ? 'Skip if you want, or jot a quick note.'
+            : 'Take your time.'}
         </span>
+        {step < total - 1 ? (
+          <button
+            type="button"
+            className="btn btn-peach"
+            onClick={next}
+            disabled={!isAnswered(current, answers[current.id]) || busy}
+            style={{ opacity: !isAnswered(current, answers[current.id]) ? 0.55 : 1 }}
+          >
+            Next →
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-peach"
+            onClick={submit}
+            disabled={!isAnswered(QUESTIONS[0], answers[QUESTIONS[0].id]) || !isAnswered(QUESTIONS[2], answers[QUESTIONS[2].id]) || busy}
+          >
+            {busy ? 'Seeding memory…' : 'Seed my twin →'}
+          </button>
+        )}
       </div>
-    </form>
+    </div>
   );
 }
 
-function Field({ label, hint, children }) {
+// ===================================================================
+// One conversation turn: assistant question + the user's input.
+// ===================================================================
+
+function Turn({ q, value, isCurrent, onChange }) {
+  const collapsed = !isCurrent;
   return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-        <span style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>{label}</span>
-        {hint ? <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{hint}</span> : null}
-      </div>
-      {children}
-    </label>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        opacity: collapsed ? 0.6 : 1,
+        transition: 'opacity 200ms ease',
+      }}
+    >
+      <AssistantBubble text={q.ask} hint={q.hint} />
+      <UserInput q={q} value={value} onChange={onChange} disabled={collapsed} />
+    </div>
   );
 }
 
-function ChipGroup({ options, selected, onToggle, allowCustom, onAddCustom }) {
+function AssistantBubble({ text, hint }) {
+  return (
+    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+      <div
+        style={{
+          width: 26,
+          height: 26,
+          borderRadius: '50%',
+          background: 'var(--peach-10)',
+          color: 'var(--peach)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: 12,
+          fontWeight: 600,
+          flexShrink: 0,
+          marginTop: 2,
+        }}
+      >P</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
+        <div style={{ fontSize: 14, color: 'var(--text)', lineHeight: 1.5 }}>{text}</div>
+        {hint ? (
+          <div style={{ fontSize: 11.5, color: 'var(--text-faint)', lineHeight: 1.5 }}>{hint}</div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function UserInput({ q, value, onChange, disabled }) {
+  switch (q.kind) {
+    case 'text':
+      return (
+        <input
+          className="onboard-input"
+          value={value ?? ''}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={q.placeholder ?? ''}
+          disabled={disabled}
+          style={{ marginLeft: 34 }}
+        />
+      );
+    case 'longtext':
+      return (
+        <textarea
+          className="onboard-input"
+          rows={2}
+          value={value ?? ''}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={q.placeholder ?? ''}
+          disabled={disabled}
+          style={{ marginLeft: 34, padding: '8px 10px', resize: 'vertical' }}
+        />
+      );
+    case 'chips':
+      return (
+        <ChipPicker
+          options={q.options}
+          selected={value ?? []}
+          onChange={onChange}
+          max={q.max}
+          disabled={disabled}
+          allowCustom={false}
+        />
+      );
+    case 'chips+custom':
+      return (
+        <ChipPicker
+          options={q.options}
+          selected={value ?? []}
+          onChange={onChange}
+          max={q.max}
+          disabled={disabled}
+          allowCustom
+        />
+      );
+    case 'radio':
+      return (
+        <div style={{ marginLeft: 34, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {q.options.map((opt) => (
+            <label
+              key={opt.id}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                padding: '8px 10px',
+                borderRadius: 8,
+                border: `1px solid ${value === opt.id ? 'var(--peach)' : 'var(--border)'}`,
+                background: value === opt.id ? 'var(--peach-10)' : 'transparent',
+                cursor: disabled ? 'default' : 'pointer',
+                fontSize: 12.5,
+                color: value === opt.id ? 'var(--peach)' : 'var(--text-2)',
+              }}
+            >
+              <input
+                type="radio"
+                name={q.id}
+                checked={value === opt.id}
+                onChange={() => !disabled && onChange(opt.id)}
+                disabled={disabled}
+                style={{ accentColor: 'var(--peach)' }}
+              />
+              {opt.label}
+            </label>
+          ))}
+        </div>
+      );
+    case 'idols':
+      return (
+        <IdolPicker
+          options={q.options}
+          selected={value ?? []}
+          onChange={onChange}
+          max={q.max}
+          disabled={disabled}
+        />
+      );
+    case 'samples':
+      return (
+        <div style={{ marginLeft: 34, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {[0, 1, 2].map((i) => (
+            <textarea
+              key={i}
+              className="onboard-input"
+              rows={2}
+              placeholder={i === 0 ? "e.g. 'The opposite of discipline isn't laziness. It's drift.'" : '(optional)'}
+              value={value?.[i] ?? ''}
+              disabled={disabled}
+              onChange={(e) => {
+                const next = [...(value ?? ['', '', ''])];
+                next[i] = e.target.value;
+                onChange(next);
+              }}
+              style={{ padding: '8px 10px', resize: 'vertical', fontSize: 13 }}
+            />
+          ))}
+        </div>
+      );
+    default:
+      return null;
+  }
+}
+
+function ChipPicker({ options, selected, onChange, max = 99, disabled, allowCustom }) {
   const [draft, setDraft] = useState('');
-  const submit = (e) => {
-    e?.preventDefault?.();
-    if (!draft.trim()) return;
-    onAddCustom?.(draft);
+  const toggle = (val) => {
+    if (disabled) return;
+    const has = selected.includes(val);
+    if (has) onChange(selected.filter((s) => s !== val));
+    else if (selected.length < max) onChange([...selected, val]);
+  };
+  const addCustom = () => {
+    const v = draft.trim();
+    if (!v || disabled) return;
+    if (selected.includes(v) || selected.length >= max) return;
+    onChange([...selected, v]);
     setDraft('');
   };
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+    <div style={{ marginLeft: 34, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
       {options.map((opt) => {
         const on = selected.includes(opt);
         return (
           <button
             key={opt}
             type="button"
-            onClick={() => onToggle(opt)}
+            disabled={disabled}
+            onClick={() => toggle(opt)}
             style={{
               fontSize: 11.5,
               padding: '4px 10px',
@@ -280,7 +562,7 @@ function ChipGroup({ options, selected, onToggle, allowCustom, onAddCustom }) {
               border: `1px solid ${on ? 'var(--peach)' : 'var(--border)'}`,
               background: on ? 'var(--peach-10)' : 'transparent',
               color: on ? 'var(--peach)' : 'var(--text-mute)',
-              cursor: 'pointer',
+              cursor: disabled ? 'default' : 'pointer',
             }}
           >
             {on ? '✓ ' : '+ '}{opt}
@@ -291,7 +573,8 @@ function ChipGroup({ options, selected, onToggle, allowCustom, onAddCustom }) {
         <button
           key={`custom-${custom}`}
           type="button"
-          onClick={() => onToggle(custom)}
+          onClick={() => toggle(custom)}
+          disabled={disabled}
           style={{
             fontSize: 11.5,
             padding: '4px 10px',
@@ -299,74 +582,41 @@ function ChipGroup({ options, selected, onToggle, allowCustom, onAddCustom }) {
             border: '1px solid var(--peach)',
             background: 'var(--peach-10)',
             color: 'var(--peach)',
-            cursor: 'pointer',
+            cursor: disabled ? 'default' : 'pointer',
           }}
         >✓ {custom}</button>
       ))}
       {allowCustom ? (
-        <span onSubmit={submit} style={{ display: 'inline-flex', gap: 4 }}>
-          <input
-            className="onboard-input"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit(e); } }}
-            placeholder="+ add custom"
-            style={{
-              fontSize: 11.5,
-              padding: '4px 10px',
-              borderRadius: 999,
-              minWidth: 110,
-              maxWidth: 180,
-            }}
-          />
-        </span>
+        <input
+          className="onboard-input"
+          value={draft}
+          disabled={disabled}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addCustom(); } }}
+          placeholder="+ add your own"
+          style={{ fontSize: 11.5, padding: '4px 10px', borderRadius: 999, minWidth: 110, maxWidth: 180 }}
+        />
       ) : null}
     </div>
   );
 }
 
-function Radio({ name, value, options, onChange }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      {options.map((opt) => (
-        <label key={opt.id} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 12.5, color: 'var(--text-2)' }}>
-          <input
-            type="radio"
-            name={name}
-            checked={value === opt.id}
-            onChange={() => onChange(opt.id)}
-            style={{ accentColor: 'var(--peach)' }}
-          />
-          {opt.label}
-        </label>
-      ))}
-    </div>
-  );
-}
-
-function IdolPicker({ selected, onAdd, onRemove, suggestions }) {
+function IdolPicker({ options, selected, onChange, max, disabled }) {
   const [draft, setDraft] = useState('');
-  const submit = () => {
-    if (!draft.trim()) return;
-    onAdd(draft);
+  const add = (v) => {
+    const trimmed = String(v).trim();
+    if (!trimmed || disabled) return;
+    if (selected.includes(trimmed) || selected.length >= max) return;
+    onChange([...selected, trimmed]);
     setDraft('');
   };
-  const free = suggestions.filter((s) => !selected.includes(s));
+  const remove = (v) => {
+    if (disabled) return;
+    onChange(selected.filter((x) => x !== v));
+  };
+  const free = options.filter((o) => !selected.includes(o));
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ display: 'flex', gap: 6 }}>
-        <input
-          className="onboard-input"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } }}
-          placeholder="Naval Ravikant"
-          style={{ flex: 1, padding: '8px 10px', fontSize: 13 }}
-        />
-        <button type="button" className="btn" onClick={submit} disabled={!draft.trim() || selected.length >= 5}>
-          + Add
-        </button>
-      </div>
+    <div style={{ marginLeft: 34, display: 'flex', flexDirection: 'column', gap: 8 }}>
       {selected.length > 0 ? (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
           {selected.map((s) => (
@@ -386,24 +636,42 @@ function IdolPicker({ selected, onAdd, onRemove, suggestions }) {
               {s}
               <button
                 type="button"
-                onClick={() => onRemove(s)}
-                style={{ background: 'transparent', border: 0, color: 'var(--peach)', cursor: 'pointer', fontSize: 12, padding: '0 4px' }}
+                disabled={disabled}
+                onClick={() => remove(s)}
+                style={{ background: 'transparent', border: 0, color: 'var(--peach)', cursor: disabled ? 'default' : 'pointer', fontSize: 12, padding: '0 4px' }}
               >✕</button>
             </span>
           ))}
         </div>
       ) : null}
-      {free.length > 0 ? (
-        <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>
-          Suggestions:{' '}
-          {free.slice(0, 6).map((s, i) => (
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input
+          className="onboard-input"
+          value={draft}
+          disabled={disabled || selected.length >= max}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(draft); } }}
+          placeholder={selected.length >= max ? `max ${max} reached` : 'name a creator…'}
+          style={{ flex: 1, padding: '8px 10px', fontSize: 13 }}
+        />
+        <button
+          type="button"
+          className="btn"
+          onClick={() => add(draft)}
+          disabled={disabled || !draft.trim() || selected.length >= max}
+        >+ Add</button>
+      </div>
+      {free.length > 0 && selected.length < max ? (
+        <div style={{ fontSize: 11, color: 'var(--text-faint)', display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+          <span style={{ marginRight: 6 }}>tap to add:</span>
+          {free.map((s) => (
             <button
               key={s}
               type="button"
-              onClick={() => onAdd(s)}
-              disabled={selected.length >= 5}
-              style={{ background: 'transparent', border: 0, color: 'var(--peach)', cursor: 'pointer', fontSize: 11, padding: 0, marginRight: 8 }}
-            >+ {s}{i < Math.min(5, free.length - 1) ? '' : ''}</button>
+              disabled={disabled}
+              onClick={() => add(s)}
+              style={{ background: 'transparent', border: 0, color: 'var(--peach)', cursor: disabled ? 'default' : 'pointer', fontSize: 11, padding: 0, marginRight: 8 }}
+            >+ {s}</button>
           ))}
         </div>
       ) : null}
@@ -423,7 +691,7 @@ function SubmittedPanel({ result }) {
         borderRadius: 10,
         display: 'flex',
         flexDirection: 'column',
-        gap: 8,
+        gap: 10,
       }}
     >
       <div style={{ fontSize: 13, color: 'var(--mint)' }}>
@@ -437,12 +705,12 @@ function SubmittedPanel({ result }) {
         ) : null)}
       </div>
       {(result.idolPacks ?? []).length > 0 ? (
-        <div style={{ fontSize: 11.5, color: 'var(--text-mute)', marginTop: 4 }}>
-          Idol traits: {result.idolPacks.map((p) => `${p.name} (${p.count} · ${p.source})`).join(' · ')}
-          {' '}— {idolTotal} style anchors stored as semantic memory
+        <div style={{ fontSize: 11.5, color: 'var(--text-mute)' }}>
+          Voice anchors: {result.idolPacks.map((p) => `${p.name} (${p.count} · ${p.source})`).join(' · ')}
+          {' '}— {idolTotal} style traits stored as semantic memory
         </div>
       ) : null}
-      <div style={{ fontSize: 11, color: 'var(--text-faint)', marginTop: 4 }}>
+      <div style={{ fontSize: 11, color: 'var(--text-faint)' }}>
         Click <strong>Continue →</strong> to name your twin.
       </div>
     </div>
