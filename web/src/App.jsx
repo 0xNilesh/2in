@@ -7,7 +7,6 @@ import { AppShell } from './layout/AppShell.jsx';
 import Landing from './routes/Landing.jsx';
 import Onboarding from './routes/Onboarding.jsx';
 import Chat from './routes/Chat.jsx';
-import TeamChat from './routes/TeamChat.jsx';
 import Activity from './routes/Activity.jsx';
 import Specialist from './routes/Specialist.jsx';
 import Memory from './routes/Memory.jsx';
@@ -25,7 +24,6 @@ export default function App() {
       <Route element={<AppShell />}>
         <Route path="chat" element={<Chat />} />
         <Route path="chat/:threadId" element={<Chat />} />
-        <Route path="team/:specialistId" element={<TeamChat />} />
         <Route path="activity" element={<Activity />} />
         <Route path="specialist/:id" element={<Specialist />} />
         <Route path="memory" element={<Memory />} />

@@ -241,7 +241,7 @@ export default function Specialist() {
         sub={s.description}
         right={
           <>
-            <Link to={isDirector ? ROUTES.chat : ROUTES.team(s.id)} className="btn">Open thread →</Link>
+            <Link to={ROUTES.chat} className="btn">Chat with director →</Link>
             <button className="btn">Authorize usage</button>
             <button className="btn">Transfer</button>
           </>

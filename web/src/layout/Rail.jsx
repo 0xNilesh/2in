@@ -128,13 +128,12 @@ export function Rail() {
         {!collapsed.team ? (
           <>
             {specialists.map((s) => (
-              <Row key={s.id} to={ROUTES.team(s.id)}>
+              <Row key={s.id} to={ROUTES.specialist(s.id)}>
                 <Avatar initial={s.initial} dot={s.statusDot} />
                 <span className="label">{s.name}</span>
                 <span className="id">#{s.tokenId}</span>
               </Row>
             ))}
-            <a className="add"><span className="ic">+</span>Train new specialist</a>
           </>
         ) : null}
 

@@ -5,7 +5,6 @@ export const ROUTES = {
   onboarding: '/onboarding',
   chat: '/chat',
   chatThread: (id) => `/chat/${id}`,
-  team: (id) => `/team/${id}`,
   specialist: (id) => `/specialist/${id}`,
   activity: '/activity',
   memory: '/memory',
