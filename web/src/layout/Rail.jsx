@@ -10,10 +10,24 @@ import { useEffect, useState } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { ROUTES } from '../lib/routes.js';
 import { specialists } from '../data/specialists.js';
-import { user } from '../data/user.js';
 import { useTwin } from '../hooks/useTwin.js';
+import { useAuth } from '../hooks/useAuth.js';
 import { Avatar } from '../components/Avatar.jsx';
 import { useThreads, relativeTime } from '../hooks/useThreads.js';
+
+// Short-format an Ethereum address. Returns `—` when nothing is connected.
+function shortAddr(a) {
+  return a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '—';
+}
+
+// True when the user has run the Settings → Authorize orchestrator flow.
+// Settings writes this flag on a confirmed delegateAccess tx and
+// dispatches `2in:delegated-changed` for in-tab subscribers; cross-tab
+// updates come through the native `storage` event.
+function isDelegated() {
+  try { return window.localStorage.getItem('2in:delegated') === '1'; }
+  catch { return false; }
+}
 
 // Persisted collapse state per section. Default the team to closed since the
 // roster is 8 long and direct subagent chat is the rarer path.
@@ -79,10 +93,24 @@ export function Rail() {
   const loc = useLocation();
   const { threads, createThread } = useThreads();
   const [collapsed, setCollapsed] = useState(loadCollapsed);
+  const auth = useAuth();
+  const [delegated, setDelegated] = useState(() => isDelegated());
 
   useEffect(() => {
     try { window.localStorage.setItem(COLLAPSE_KEY, JSON.stringify(collapsed)); } catch {}
   }, [collapsed]);
+
+  // Keep the delegated pill in sync with the authorize flow in Settings
+  // (same-tab via custom event) and with cross-tab logout/reset (storage).
+  useEffect(() => {
+    const sync = () => setDelegated(isDelegated());
+    window.addEventListener('storage', sync);
+    window.addEventListener('2in:delegated-changed', sync);
+    return () => {
+      window.removeEventListener('storage', sync);
+      window.removeEventListener('2in:delegated-changed', sync);
+    };
+  }, []);
 
   const toggle = (key) => () => setCollapsed((s) => ({ ...s, [key]: !s[key] }));
 
@@ -174,11 +202,11 @@ export function Rail() {
         <div className="wallet">
           <div className="ww"></div>
           <div className="meta">
-            <div className="h">{user.handle}</div>
-            <div className="a">{user.shortAddress}</div>
+            <div className="h">{shortAddr(auth.address)}</div>
+            <div className="a">galileo · 16602</div>
           </div>
         </div>
-        {user.delegated ? <span className="deleg-pill">delegated</span> : null}
+        {delegated ? <span className="deleg-pill">delegated</span> : null}
       </footer>
     </aside>
   );

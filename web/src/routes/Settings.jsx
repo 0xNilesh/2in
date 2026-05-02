@@ -1,20 +1,39 @@
-// Settings — wallet · delegate · mode (JOURNEY §7).
+// Settings — wallet · delegate · runtime · sources.
+//
+// What works today:
+//   - Wallet → Disconnect (real Privy logout + redirect)
+//   - Delegate → Authorize orchestrator (real delegateAccess on the
+//     REAL master tokenId from 2in:mints — not the static demo number)
+//   - Danger zone → Reset everything (wipes localStorage + server memory
+//     + Privy session)
+//
+// Everything else is visibly disabled with a `soon` suffix on its action
+// button so the surface is honest about what we ship today vs. roadmap:
+//   - Handle edit
+//   - Auto-snapshot threshold adjust
+//   - Private mode toggle (TeeML routing isn't wired)
+//   - Multichain switch (only Galileo is supported)
+//   - 8 social / document source connectors
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader.jsx';
 import { StatusPill } from '../components/StatusPill.jsx';
-import { user } from '../data/user.js';
 import { useAuth } from '../hooks/useAuth.js';
 import { useViemWalletClient } from '../lib/privy-signer.js';
 import { isChainConfigured, chainConfig, getExplorerTxUrl } from '../lib/chain.js';
 import { TWIN_INFT_ABI } from '../lib/abi/twin-nft.js';
 import { chainApi } from '../lib/api.js';
-import { ROUTES } from '../lib/routes.js';
 import { pushToast } from '../hooks/useToasts.js';
 
-const MASTER_TOKEN_ID = 42n; // demo master twin tokenId
-const ORCHESTRATOR_DELEGATE = '0x91ab2f7d000000000000000000000000000002f7d1'; // 40-char placeholder
+const ORCHESTRATOR_DELEGATE = '0x91ab2f7d000000000000000000000000000002f7d1'; // demo hot wallet placeholder
+
+function getMasterTokenId() {
+  try {
+    const m = JSON.parse(window.localStorage.getItem('2in:mints') ?? '{}');
+    return m.master?.tokenId ?? null;
+  } catch { return null; }
+}
 
 function useDelegateAuth() {
   const { walletClient, address } = useViemWalletClient();
@@ -22,32 +41,42 @@ function useDelegateAuth() {
   const [txHash, setTxHash] = useState(null);
   const [error, setError] = useState(null);
 
+  const masterId = getMasterTokenId();
+
   const authorize = async () => {
+    if (!masterId) {
+      setError('No master twin minted yet — finish onboarding first');
+      setStatus('failed');
+      return;
+    }
     setStatus('submitting');
     setError(null);
     setTxHash(null);
     try {
       let hash;
       if (walletClient && isChainConfigured()) {
-        // Real path: user signs delegateAccess(masterTokenId, orchestrator).
         hash = await walletClient.writeContract({
           address: chainConfig.contractAddress,
           abi: TWIN_INFT_ABI,
           functionName: 'delegateAccess',
-          args: [MASTER_TOKEN_ID, ORCHESTRATOR_DELEGATE],
+          args: [BigInt(masterId), ORCHESTRATOR_DELEGATE],
         });
       }
-      // Echo to server for telemetry — also covers the mock path entirely.
-      const res = await chainApi.delegate(Number(MASTER_TOKEN_ID), ORCHESTRATOR_DELEGATE, hash);
+      const res = await chainApi.delegate(Number(masterId), ORCHESTRATOR_DELEGATE, hash);
       setTxHash(res.txHash);
       setStatus('confirmed');
+      // Persist the delegated flag so Rail's footer pill reflects reality.
+      try {
+        window.localStorage.setItem('2in:delegated', '1');
+        window.dispatchEvent(new Event('2in:delegated-changed'));
+      } catch { /* ignore */ }
     } catch (err) {
       setError(err.message ?? 'delegate_failed');
       setStatus('failed');
     }
   };
 
-  return { status, txHash, error, authorize, address };
+  return { status, txHash, error, authorize, address, masterId };
 }
 
 // Wipe everything that ties this browser to a particular twin: localStorage
@@ -55,7 +84,6 @@ function useDelegateAuth() {
 // rail, banner dismissals, corpus). Server memory persists on disk —
 // optionally clear it too via /api/memory/wipe.
 async function wipeLocalAndServer({ alsoServer = true }) {
-  // localStorage keys we own
   const KEYS = [
     '2in:twin',
     '2in:threads',
@@ -65,22 +93,19 @@ async function wipeLocalAndServer({ alsoServer = true }) {
     '2in:memory',
     '2in:corpus:twitter',
     '2in:banner:dismissed:quill',
+    '2in:mints',
   ];
   try {
     for (const k of KEYS) window.localStorage.removeItem(k);
-    // Wipe per-task caches (variable suffix)
     for (let i = window.localStorage.length - 1; i >= 0; i--) {
       const k = window.localStorage.key(i);
-      if (k && (k.startsWith('2in:task:') || k.startsWith('2in:'))) {
-        window.localStorage.removeItem(k);
-      }
+      if (k && k.startsWith('2in:')) window.localStorage.removeItem(k);
     }
     window.sessionStorage.clear();
   } catch { /* quota/blocked — ignore */ }
 
   if (alsoServer) {
     try {
-      // Best-effort wipe of every memory type for the demo twin.
       const types = ['episodic', 'semantic', 'relationship', 'temporal', 'procedural', 'working'];
       for (const t of types) {
         const list = await fetch(`/api/memory/${t}/list?twin=42`).then((r) => r.ok ? r.json() : { entries: [] });
@@ -93,6 +118,39 @@ async function wipeLocalAndServer({ alsoServer = true }) {
     } catch { /* server may be down — local wipe still useful */ }
   }
 }
+
+// === presentational ==================================================
+const SOON_BTN = { opacity: 0.55, cursor: 'not-allowed' };
+const SOON_TAG = { opacity: 0.6, fontSize: 10, marginLeft: 5, fontFamily: 'Geist Mono, monospace' };
+
+function SoonRow({ label, sub, value, action }) {
+  return (
+    <div className="settings-row">
+      <div className="k">
+        {label}
+        <span className="s">{sub}</span>
+      </div>
+      <div className="v" style={{ color: 'var(--text-mute)' }}>{value}</div>
+      <button className="btn" disabled style={SOON_BTN}>
+        {action}<span style={SOON_TAG}>soon</span>
+      </button>
+    </div>
+  );
+}
+
+// Source connectors we'd want — all currently disabled. Labels describe
+// which specialist would consume the corpus, so the user can see what each
+// integration would unlock.
+const SOURCES = [
+  { id: 'twitter',   name: 'Twitter / X',         sub: 'Posts, threads, replies — primary corpus for Writer + Voice' },
+  { id: 'linkedin',  name: 'LinkedIn',            sub: 'Long-form posts and engagement signals' },
+  { id: 'substack',  name: 'Substack',            sub: 'Essay archive + subscriber list' },
+  { id: 'youtube',   name: 'YouTube',             sub: 'Video transcripts via Whisper for the Voice specialist' },
+  { id: 'spotify',   name: 'Spotify · Podcasts',  sub: 'Episode transcripts via Whisper' },
+  { id: 'instagram', name: 'Instagram',           sub: 'Captions + visual archive for the Visual specialist' },
+  { id: 'notion',    name: 'Notion workspace',    sub: 'Personal notes + drafts ingested into semantic memory' },
+  { id: 'gdrive',    name: 'Google Drive · PDFs', sub: 'Contracts and research docs (Negotiator + Researcher)' },
+];
 
 export default function Settings() {
   const delegate = useDelegateAuth();
@@ -120,11 +178,14 @@ export default function Settings() {
     }
   };
 
+  const shortAddr = auth.address ? `${auth.address.slice(0, 6)}…${auth.address.slice(-4)}` : '—';
+
   return (
     <>
       <PageHeader title="Settings" sub="Wallet · delegate · runtime mode" />
       <div className="scroll">
         <div className="page page-narrow">
+
           <div className="label-mono" style={{ marginBottom: 10 }}>Wallet</div>
           <div className="card" style={{ padding: 0 }}>
             <div className="settings-row">
@@ -132,7 +193,7 @@ export default function Settings() {
                 Cold wallet
                 <span className="s">Owns every iNFT in your roster</span>
               </div>
-              <div className="v">{auth.address ?? user.fullAddress}</div>
+              <div className="v">{auth.address ?? '—'}</div>
               <button
                 className="btn"
                 onClick={() => {
@@ -142,18 +203,14 @@ export default function Settings() {
                 }}
                 disabled={!auth.authenticated}
                 style={{ opacity: auth.authenticated ? 1 : 0.5 }}
-              >
-                Disconnect
-              </button>
+              >Disconnect</button>
             </div>
-            <div className="settings-row">
-              <div className="k">
-                Handle
-                <span className="s">Resolved from ENS · falls back to short address</span>
-              </div>
-              <div className="v">{user.handle}</div>
-              <button className="btn">Edit</button>
-            </div>
+            <SoonRow
+              label="Handle"
+              sub="Custom display name (ENS or arbitrary)"
+              value={shortAddr}
+              action="Edit"
+            />
           </div>
 
           <div className="label-mono" style={{ margin: '24px 0 10px' }}>Delegate</div>
@@ -165,6 +222,15 @@ export default function Settings() {
               </div>
               <div className="v" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <span>{ORCHESTRATOR_DELEGATE.slice(0, 6)}…{ORCHESTRATOR_DELEGATE.slice(-4)}</span>
+                {delegate.masterId ? (
+                  <span style={{ fontSize: 10.5, color: 'var(--text-faint)', fontFamily: 'Geist Mono, monospace' }}>
+                    on tokenId #{delegate.masterId}
+                  </span>
+                ) : (
+                  <span style={{ fontSize: 10.5, color: 'var(--amber)' }}>
+                    no master minted — finish onboarding
+                  </span>
+                )}
                 {delegate.txHash ? (
                   <a
                     href={getExplorerTxUrl(delegate.txHash)}
@@ -186,19 +252,21 @@ export default function Settings() {
               ) : delegate.status === 'failed' ? (
                 <button className="btn" onClick={delegate.authorize}>Retry</button>
               ) : (
-                <button className="btn btn-peach" onClick={delegate.authorize}>
-                  Authorize orchestrator
-                </button>
+                <button
+                  className="btn btn-peach"
+                  onClick={delegate.authorize}
+                  disabled={!delegate.masterId}
+                  style={{ opacity: delegate.masterId ? 1 : 0.55, cursor: delegate.masterId ? 'pointer' : 'not-allowed' }}
+                  title={delegate.masterId ? 'Sign delegateAccess on chain' : 'Mint your master twin during onboarding first'}
+                >Authorize orchestrator</button>
               )}
             </div>
-            <div className="settings-row">
-              <div className="k">
-                Auto-snapshot threshold
-                <span className="s">Memory delta that triggers updateMetadata on chain</span>
-              </div>
-              <div className="v">3 entries · 24h</div>
-              <button className="btn">Adjust</button>
-            </div>
+            <SoonRow
+              label="Auto-snapshot threshold"
+              sub="Memory delta that triggers updateMetadata on chain"
+              value="3 entries · 24h (default)"
+              action="Adjust"
+            />
           </div>
 
           <div className="label-mono" style={{ margin: '24px 0 10px' }}>Runtime mode</div>
@@ -208,16 +276,22 @@ export default function Settings() {
                 Private mode
                 <span className="s">Routes every Compute call through TeeML providers + verifies signatures</span>
               </div>
-              <div className="v">off</div>
-              <span className={`toggle${user.privateMode ? ' on' : ''}`}></span>
+              <div className="v" style={{ color: 'var(--text-mute)' }}>off</div>
+              <span
+                className="toggle"
+                style={{ opacity: 0.32, cursor: 'not-allowed' }}
+                title="TeeML routing is on the roadmap"
+              ></span>
             </div>
             <div className="settings-row">
               <div className="k">
                 Default chain
-                <span className="s">Galileo testnet · 16602</span>
+                <span className="s">Galileo testnet · 16602 · only chain currently supported</span>
               </div>
               <div className="v">galileo</div>
-              <button className="btn">Switch</button>
+              <button className="btn" disabled style={SOON_BTN} title="Multichain coming later">
+                Switch<span style={SOON_TAG}>soon</span>
+              </button>
             </div>
           </div>
 
@@ -242,39 +316,37 @@ export default function Settings() {
                   color: 'var(--red)',
                   whiteSpace: 'nowrap',
                 }}
-              >
-                {resetting ? 'wiping…' : 'Reset everything'}
-              </button>
+              >{resetting ? 'wiping…' : 'Reset everything'}</button>
             </div>
           </div>
 
           <div className="label-mono" style={{ margin: '24px 0 10px' }}>Connected sources</div>
           <div className="card" style={{ padding: 0 }}>
-            <div className="settings-row">
-              <div className="k">
-                Twitter / X
-                <span className="s">Quill ingests tweets read-only · never publishes</span>
+            {SOURCES.map((s) => (
+              <div key={s.id} className="settings-row">
+                <div className="k">
+                  {s.name}
+                  <span className="s">{s.sub}</span>
+                </div>
+                <div className="v" style={{ color: 'var(--text-mute)' }}>not connected</div>
+                <button className="btn" disabled style={SOON_BTN}>
+                  Connect<span style={SOON_TAG}>soon</span>
+                </button>
               </div>
-              <div className="v">@nilesh</div>
-              <button className="btn">Revoke</button>
-            </div>
-            <div className="settings-row">
-              <div className="k">
-                Spotify · podcast feed
-                <span className="s">Cadence ingests transcripts via Whisper</span>
-              </div>
-              <div className="v">24 episodes</div>
-              <button className="btn">Revoke</button>
-            </div>
-            <div className="settings-row">
-              <div className="k">
-                Contracts · PDF
-                <span className="s">Mantle ingests for clause review</span>
-              </div>
-              <div className="v">14 docs</div>
-              <button className="btn">Manage</button>
-            </div>
+            ))}
           </div>
+
+          <div style={{
+            fontSize: 11,
+            color: 'var(--text-faint)',
+            margin: '14px 0 4px',
+            textAlign: 'center',
+            lineHeight: 1.6,
+          }}>
+            Sources marked <code style={{ color: 'var(--text-mute)' }}>soon</code> are on the roadmap —
+            today only the corpus you typed during onboarding feeds memory.
+          </div>
+
         </div>
       </div>
     </>
