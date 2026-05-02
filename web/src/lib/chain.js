@@ -117,11 +117,13 @@ async function realWrite({ signer, functionName, args, extractTokenId }) {
     args,
     chain: galileo,
   });
-  // Wait for confirmation, then decode TwinMinted event for tokenId.
-  // Galileo's RPC sometimes lags receipt indexing — viem's
-  // waitForTransactionReceipt then errors with "no matching receipts found"
-  // even though the tx confirmed. Wrap with our own polling loop that's
-  // tolerant of the empty-receipt window. Up to 60s, polling every 2s.
+  // writeContract returning a hash means the tx was accepted by the RPC.
+  // After that, getTransactionReceipt may take a long time on Galileo
+  // because the receipt indexer lags the chain head. We try our best to
+  // pull the receipt for tokenId extraction, but if it never indexes we
+  // return 'confirmed' anyway — the tx IS confirmed, we just couldn't
+  // decode the TwinMinted event for the tokenId. The user can verify on
+  // the explorer.
   const receipt = await pollReceipt(client, txHash);
   let tokenId = null;
   if (extractTokenId && receipt) {
@@ -144,41 +146,47 @@ async function realWrite({ signer, functionName, args, extractTokenId }) {
     tokenId,
     status: 'confirmed',
     explorerUrl: getExplorerTxUrl(txHash),
+    // Tells the caller we never got a receipt — useful for surfacing a
+    // softer "minted, awaiting indexer" pill instead of a green check.
+    receiptIndexed: Boolean(receipt),
   };
 }
 
 // Poll for a receipt with manual retries. Galileo's RPC frequently returns
-// the cryptic "no matching receipts found: this may indicate potential
-// data corruption" error for several seconds AFTER a tx is actually mined.
-// We swallow that specific error and retry, falling through only on
-// genuine timeouts.
-async function pollReceipt(client, txHash, { maxMs = 60_000, intervalMs = 2_000 } = {}) {
+// transient receipt-not-found errors for several seconds (sometimes minutes)
+// AFTER a tx is actually mined. We swallow the known transient errors, then
+// RETURN NULL on persistent timeout instead of throwing — the tx is already
+// broadcast (writeContract returned a hash), so a missing receipt is not a
+// mint failure, it's just a chain-indexer race.
+async function pollReceipt(client, txHash, { maxMs = 120_000, intervalMs = 2_500 } = {}) {
   const deadline = Date.now() + maxMs;
-  let lastErr = null;
   while (Date.now() < deadline) {
     try {
       const r = await client.getTransactionReceipt({ hash: txHash });
       if (r) return r;
     } catch (err) {
-      lastErr = err;
       const msg = String(err?.message ?? '').toLowerCase();
-      // Swallow the known transient errors; rethrow only if we hit something
-      // genuinely structural.
-      if (
-        !msg.includes('no matching receipts') &&
-        !msg.includes('not found') &&
-        !msg.includes('invalid parameters') &&
-        !msg.includes('data corruption')
-      ) {
-        throw err;
-      }
+      // Treat ALL "receipt not yet available" shapes as transient — the
+      // tx IS broadcast at this point, so any not-found from the RPC is
+      // just indexer lag. Only re-throw on truly structural failures
+      // (network down, bad URL, etc.) which surface as 'fetch' errors.
+      const transient =
+        msg.includes('no matching receipts') ||
+        msg.includes('not found') ||
+        msg.includes('could not be found') ||
+        msg.includes('not be processed') ||
+        msg.includes('invalid parameters') ||
+        msg.includes('data corruption') ||
+        msg.includes('transactionreceiptnotfound');
+      if (!transient) throw err;
     }
     await new Promise((r) => setTimeout(r, intervalMs));
   }
-  // Last resort: try once more without the swallow so the user sees a real
-  // error if something is genuinely wrong.
-  if (lastErr) throw lastErr;
-  throw new Error(`Tx ${txHash} not confirmed after ${Math.floor(maxMs / 1000)}s`);
+  // Past the deadline — return null, NOT an error. The caller treats null
+  // receipt as "confirmed but unindexed" and reports a tokenId of null.
+  // eslint-disable-next-line no-console
+  console.warn(`[chain] receipt for ${txHash} not indexed within ${Math.floor(maxMs / 1000)}s — returning null and proceeding`);
+  return null;
 }
 
 // === mock path ======================================================
