@@ -2,6 +2,7 @@
 // Renders ERC-7857 fields fetched LIVE via /api/chain/twin/:tokenId, with
 // the static specialist roster (data/specialists.js) as fallback metadata.
 
+import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader.jsx';
 import { Avatar } from '../components/Avatar.jsx';
@@ -12,6 +13,9 @@ import { ROUTES } from '../lib/routes.js';
 import { gatewayUrl } from '../lib/format.js';
 import { useTwinNft } from '../hooks/useTwinNft.js';
 import { useSnapshotHistory } from '../hooks/useSnapshotHistory.js';
+import { useViemWalletClient } from '../lib/privy-signer.js';
+import { transferSpecialist, getExplorerTxUrl } from '../lib/chain.js';
+import { pushToast } from '../hooks/useToasts.js';
 
 function relativeTime(ts) {
   const d = Date.now() - ts;
@@ -19,6 +23,148 @@ function relativeTime(ts) {
   if (d < 3_600_000) return `${Math.round(d / 60_000)}m ago`;
   if (d < 86_400_000) return `${Math.round(d / 3_600_000)}h ago`;
   return `${Math.round(d / 86_400_000)}d ago`;
+}
+
+function TransferButton({ specialist, chainOwner }) {
+  const [open, setOpen] = useState(false);
+  const [to, setTo] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const { walletClient, address: signerAddress } = useViemWalletClient();
+
+  const fromAddress = chainOwner ?? signerAddress ?? null;
+  const tokenId = specialist?.tokenId;
+  const isAddrValid = /^0x[a-fA-F0-9]{40}$/.test(to.trim());
+  const sameAsFrom = isAddrValid && fromAddress && to.trim().toLowerCase() === fromAddress.toLowerCase();
+
+  const submit = async () => {
+    setBusy(true); setError(null);
+    try {
+      if (!walletClient) throw new Error('Wallet not connected');
+      if (!fromAddress) throw new Error("Couldn't determine sender address");
+      if (!tokenId) throw new Error('No tokenId for this specialist');
+      const res = await transferSpecialist({
+        from: fromAddress,
+        to: to.trim(),
+        tokenId,
+        signer: walletClient,
+      });
+      pushToast({
+        kind: 'success',
+        title: `Transferred ${specialist.name} → ${to.trim().slice(0, 6)}…${to.trim().slice(-4)}`,
+        body: `tokenId #${tokenId} · ${res.txHash.slice(0, 10)}…`,
+        ttlMs: 6000,
+        action: res.txHash ? { label: 'view tx →', href: getExplorerTxUrl(res.txHash) } : null,
+      });
+      setOpen(false);
+      setTo('');
+    } catch (err) {
+      setError(err.message ?? 'transfer_failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button
+        className="btn"
+        onClick={() => setOpen(true)}
+        disabled={!tokenId}
+        title={tokenId ? 'Move this iNFT to another wallet' : 'No minted tokenId yet'}
+      >Transfer</button>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(0,0,0,0.6)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 100,
+      }}
+      onClick={() => !busy && setOpen(false)}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: 'min(440px, 92vw)',
+          background: 'var(--bg-soft)',
+          border: '1px solid var(--border-strong)',
+          borderRadius: 14,
+          padding: 20,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 15, color: 'var(--text)', fontWeight: 500 }}>
+            Transfer {specialist.name}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-mute)', marginTop: 4, lineHeight: 1.5 }}>
+            Calls <code style={{ color: 'var(--peach)' }}>safeTransferFrom</code> on the
+            TwinINFT contract. The new owner inherits this specialist's iNFT —
+            including its memory pointer + adapter URI when one is set.
+            Per-twin authorizations clear on transfer.
+          </div>
+        </div>
+
+        <div style={{ fontSize: 11, color: 'var(--text-faint)', fontFamily: 'Geist Mono, monospace' }}>
+          tokenId · #{tokenId}<br/>
+          from · {fromAddress ? `${fromAddress.slice(0, 6)}…${fromAddress.slice(-4)}` : '—'}
+        </div>
+
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <span style={{ fontSize: 12, color: 'var(--text-mute)' }}>Recipient address</span>
+          <input
+            autoFocus
+            value={to}
+            onChange={(e) => { setTo(e.target.value); setError(null); }}
+            onKeyDown={(e) => { if (e.key === 'Enter' && isAddrValid && !sameAsFrom) submit(); }}
+            placeholder="0x…"
+            disabled={busy}
+            style={{
+              padding: '10px 12px',
+              background: 'var(--bg)',
+              border: `1px solid ${to && !isAddrValid ? 'var(--red)' : 'var(--border-strong)'}`,
+              borderRadius: 8,
+              color: 'var(--text)',
+              fontFamily: 'Geist Mono, monospace',
+              fontSize: 13,
+              outline: 0,
+            }}
+          />
+          {to && !isAddrValid ? (
+            <span style={{ fontSize: 11, color: 'var(--red)' }}>not a valid 0x… address</span>
+          ) : sameAsFrom ? (
+            <span style={{ fontSize: 11, color: 'var(--amber)' }}>same as current owner — no-op</span>
+          ) : null}
+        </label>
+
+        {error ? (
+          <div style={{ fontSize: 12, color: 'var(--red)', padding: '6px 10px', background: 'rgba(255,80,80,0.06)', borderRadius: 6 }}>
+            {error}
+          </div>
+        ) : null}
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
+          <button className="btn" onClick={() => setOpen(false)} disabled={busy}>Cancel</button>
+          <button
+            className="btn btn-peach"
+            onClick={submit}
+            disabled={busy || !isAddrValid || sameAsFrom}
+          >
+            {busy ? 'transferring…' : 'Transfer →'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function shortHash(h, head = 8, tail = 6) {
@@ -65,8 +211,7 @@ export default function Specialist() {
         right={
           <>
             <Link to={ROUTES.chat} className="btn">Chat with director →</Link>
-            <button className="btn">Authorize usage</button>
-            <button className="btn">Transfer</button>
+            <TransferButton specialist={s} chainOwner={owner} />
           </>
         }
       />

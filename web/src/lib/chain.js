@@ -117,6 +117,20 @@ export async function getPendingNonce(address) {
   return client.getTransactionCount({ address, blockTag: 'pending' });
 }
 
+/** safeTransferFrom — moves a tokenId to a new owner. Uses the same
+ *  receipt-tolerant + nonce-retry path as mintMaster / cloneSpecialist. */
+export async function transferSpecialist({ from, to, tokenId, signer }) {
+  if (!isChainConfigured() || !signer) {
+    return mockMintTx('safeTransferFrom', { from, to, tokenId });
+  }
+  return realWrite({
+    signer,
+    functionName: 'safeTransferFrom',
+    args: [from, to, BigInt(tokenId)],
+    extractTokenId: false,
+  });
+}
+
 // === real path ======================================================
 async function realWrite({ signer, functionName, args, extractTokenId, nonce }) {
   const client = await getPublicClient();
