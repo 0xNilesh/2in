@@ -145,7 +145,11 @@ export const coreSpecialists = [
   },
 ];
 
-// === Optional 3 — opt-in during onboarding =============================
+// === Optional 3 — never minted by the current onboarding flow ==========
+// These specialists are roadmap, not shipped. tokenId/parent/adapterURI/
+// corpusURI all left null so the Specialist profile doesn't claim
+// on-chain state that doesn't exist. Profile renders an "opt-in
+// specialist · not minted" empty state instead.
 export const optionalSpecialists = [
   {
     id: 'voice',
@@ -154,14 +158,13 @@ export const optionalSpecialists = [
     fullName: 'Voice',
     role: 'Voice',
     tier: 'optional',
-    tokenId: 48,
-    parent: 42,
+    tokenId: null,
+    parent: null,
     model: 'qwen/qwen-2.5-7b-instruct',
     adapterURI: null,
     corpusURI: null,
-    status: 'untrained',
-    trainedOn: 'reads semantic + episodic · writes episodic',
-    jobs: 0,
+    status: 'not-minted',
+    trainedOn: null,
     description: 'Spoken cadence. Drafts script-style content for read-aloud — only useful for podcasters / video creators.',
   },
   {
@@ -171,14 +174,13 @@ export const optionalSpecialists = [
     fullName: 'Visual',
     role: 'Visual',
     tier: 'optional',
-    tokenId: 49,
-    parent: 42,
+    tokenId: null,
+    parent: null,
     model: 'qwen/qwen-image-edit-2511',
     adapterURI: null,
     corpusURI: null,
-    status: 'untrained',
-    trainedOn: 'reads semantic · writes episodic',
-    jobs: 0,
+    status: 'not-minted',
+    trainedOn: null,
     description: 'Generates + analyses images. Cover art, hero visuals, alt-text — opt in if you post visuals.',
   },
   {
@@ -188,14 +190,13 @@ export const optionalSpecialists = [
     fullName: 'Negotiator',
     role: 'Negotiator',
     tier: 'optional',
-    tokenId: 50,
-    parent: 42,
+    tokenId: null,
+    parent: null,
     model: 'qwen/qwen-2.5-7b-instruct',
     adapterURI: null,
     corpusURI: null,
-    status: 'untrained',
-    trainedOn: 'reads relationship + procedural · writes relationship',
-    jobs: 0,
+    status: 'not-minted',
+    trainedOn: null,
     description: 'Drafts sponsor replies + deal terms. Opt in if brand deals are part of your work.',
   },
 ];

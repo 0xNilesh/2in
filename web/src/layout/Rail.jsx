@@ -159,7 +159,6 @@ export function Rail() {
               <Row key={s.id} to={ROUTES.specialist(s.id)}>
                 <Avatar initial={s.initial} dot={s.statusDot} />
                 <span className="label">{s.name}</span>
-                <span className="id">#{s.tokenId}</span>
               </Row>
             ))}
           </>

@@ -195,6 +195,10 @@ export default function Specialist() {
   }
 
   const isDirector = s.id === 'director';
+  // Optional specialists (Voice / Visual / Negotiator) are never minted by
+  // the current onboarding flow — render a clean "not minted" empty state
+  // instead of pretending we have on-chain data for them.
+  const notMinted = s.tier === 'optional' && s.tokenId == null;
   // Prefer live chain data; fall back to the static roster fields.
   const owner = chain?.owner ?? null;
   const dataHash = chain?.dataHash ?? null;
@@ -202,6 +206,58 @@ export default function Specialist() {
   const parentTokenId = chain?.parentTokenId ?? s.parent ?? 0;
   const delegate = chain?.delegate ?? null;
   const sourceLabel = chain?.source === 'chain' ? 'on-chain · live' : chain?.source === 'mock' ? 'mock' : loading ? 'loading…' : error ? 'unavailable' : '—';
+
+  if (notMinted) {
+    return (
+      <>
+        <PageHeader
+          title={`${s.name} · ${s.role}`}
+          sub={s.description}
+          right={<Link to={ROUTES.chat} className="btn">Chat with director →</Link>}
+        />
+        <div className="scroll">
+          <div className="page">
+            <section className="card">
+              <div className="card-row">
+                <Avatar initial={s.initial} size="xl" />
+                <div className="grow">
+                  <div className="card-title" style={{ fontSize: 18 }}>{s.fullName ?? s.name}</div>
+                  <div className="card-sub" style={{ marginTop: 4 }}>
+                    Opt-in specialist — not minted on the current build.
+                  </div>
+                  <div className="card-meta" style={{ marginTop: 8 }}>
+                    <span>model · {s.model}</span>
+                    <span>tier · optional</span>
+                  </div>
+                </div>
+                <StatusPill color="amber">not minted</StatusPill>
+              </div>
+            </section>
+
+            <section style={{ marginTop: 18 }}>
+              <div
+                style={{
+                  padding: 18,
+                  border: '1px dashed var(--border-strong)',
+                  borderRadius: 12,
+                  background: 'var(--bg)',
+                  color: 'var(--text-mute)',
+                  fontSize: 13,
+                  lineHeight: 1.6,
+                }}
+              >
+                Voice, Visual and Negotiator are roadmap specialists — the current
+                onboarding mints the master twin plus the five core specialists
+                only. When opt-in mints ship, this page will populate with the
+                live ERC-7857 fields (tokenId, owner, encryptedURI, dataHash,
+                sealedKey, snapshot history) just like the core profiles.
+              </div>
+            </section>
+          </div>
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
