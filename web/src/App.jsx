@@ -13,6 +13,7 @@ import Specialist from './routes/Specialist.jsx';
 import Memory from './routes/Memory.jsx';
 import Patterns from './routes/Patterns.jsx';
 import Tools from './routes/Tools.jsx';
+import Library from './routes/Library.jsx';
 import Settings from './routes/Settings.jsx';
 import NotFound from './routes/NotFound.jsx';
 
@@ -31,6 +32,7 @@ export default function App() {
         <Route path="memory/:sliceId" element={<Memory />} />
         <Route path="patterns" element={<Patterns />} />
         <Route path="tools" element={<Tools />} />
+        <Route path="library" element={<Library />} />
         <Route path="settings" element={<Settings />} />
         <Route path="*" element={<NotFound />} />
       </Route>

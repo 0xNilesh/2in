@@ -163,4 +163,7 @@ export const uploadApi = {
     fd.append('file', file);
     return fetch(url('/api/upload'), { method: 'POST', body: fd }).then(unwrap);
   },
+  list: () => fetch(url('/api/upload/list')).then(unwrap),
+  remove: (filename) =>
+    fetch(url(`/api/upload/file/${encodeURIComponent(filename)}`), { method: 'DELETE' }).then(unwrap),
 };

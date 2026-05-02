@@ -119,19 +119,47 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(createReadStream(path));
   });
 
-  app.get('/upload/list', async () => {
+  app.get('/upload/list', async (req) => {
     await ensureDir();
     const entries = await readdir(UPLOAD_DIR);
-    const files = entries.map((name) => {
-      try {
-        const s = statSync(join(UPLOAD_DIR, name));
-        return { name, sizeBytes: s.size, mtime: s.mtimeMs };
-      } catch {
-        return null;
-      }
-    }).filter(Boolean);
-    return { files };
+    const files = entries
+      .map((name) => {
+        try {
+          const s = statSync(join(UPLOAD_DIR, name));
+          return {
+            name,
+            sizeBytes: s.size,
+            mtime: s.mtimeMs,
+            url: publicUrl(req, name),
+            kind: kindOf(name),
+            ext: extname(name).slice(1).toLowerCase(),
+          };
+        } catch {
+          return null;
+        }
+      })
+      .filter((f): f is NonNullable<typeof f> => f !== null)
+      .sort((a, b) => b.mtime - a.mtime);
+    const totalBytes = files.reduce((acc, f) => acc + f.sizeBytes, 0);
+    return { files, count: files.length, totalBytes };
   });
+
+  app.delete('/upload/file/:filename', async (req) => {
+    const { filename } = req.params as { filename: string };
+    const safe = basename(filename);
+    const path = join(UPLOAD_DIR, safe);
+    if (!existsSync(path)) throw app.httpErrors.notFound(`No file: ${safe}`);
+    await rm(path, { force: true });
+    return { ok: true, filename: safe };
+  });
+}
+
+function kindOf(filename: string): 'image' | 'video' | 'audio' | 'other' {
+  const ext = extname(filename).slice(1).toLowerCase();
+  if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tiff'].includes(ext)) return 'image';
+  if (['mp4', 'mov', 'webm', 'mkv', 'avi'].includes(ext)) return 'video';
+  if (['mp3', 'wav', 'm4a', 'ogg', 'flac'].includes(ext)) return 'audio';
+  return 'other';
 }
 
 /** Resolve an http(s) URL OR a local upload URL into a local file path that

@@ -12,5 +12,6 @@ export const ROUTES = {
   memorySlice: (id) => `/memory/${id}`,
   patterns: '/patterns',
   tools: '/tools',
+  library: '/library',
   settings: '/settings',
 };

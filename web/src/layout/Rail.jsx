@@ -159,6 +159,10 @@ export function Rail() {
               <span className="ic">⚒</span>
               <span className="label">Tools</span>
             </Row>
+            <Row to={ROUTES.library}>
+              <span className="ic">▣</span>
+              <span className="label">Library</span>
+            </Row>
           </>
         ) : null}
 
