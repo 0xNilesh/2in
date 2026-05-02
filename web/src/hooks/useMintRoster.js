@@ -6,7 +6,7 @@
 // Mock mode: deterministic tx hashes, ~1s delays per row. Same shape.
 
 import { useCallback, useState } from 'react';
-import { mintMaster, cloneSpecialist, isChainConfigured } from '../lib/chain.js';
+import { mintMaster, cloneSpecialist, getPendingNonce, isChainConfigured } from '../lib/chain.js';
 
 // Mints master + the core-5. Optional 3 (voice / visual / negotiator) are
 // surfaced as opt-in checkboxes elsewhere in onboarding and minted only on
@@ -48,6 +48,22 @@ export function useMintRoster({ twinName, walletAddress, signer, corpusUri }) {
     setDone(false);
     setRows(initialRows(twinName));
 
+    // Fetch the chain's current pending nonce ONCE before the loop, then
+    // increment locally per tx. Bypasses Privy's wallet nonce manager
+    // entirely — the chain queues sequentially-numbered txs and processes
+    // them in order even when fired back-to-back.
+    let nonce = null;
+    if (isChainConfigured() && walletAddress) {
+      try {
+        nonce = await getPendingNonce(walletAddress);
+        // eslint-disable-next-line no-console
+        console.info(`[mint] starting nonce for ${walletAddress.slice(0, 8)}… = ${nonce}`);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn(`[mint] couldn't read starting nonce — falling back to wallet auto: ${err.message}`);
+      }
+    }
+
     let masterTokenId = null;
     let i = 0;
     for (const r of ROSTER) {
@@ -55,19 +71,23 @@ export function useMintRoster({ twinName, walletAddress, signer, corpusUri }) {
       // Mark this row submitting
       setRows((rs) => rs.map((x) => (x.id === r.id ? { ...x, status: 'submitting' } : x)));
       try {
+        const txNonce = nonce != null ? nonce : undefined;
         const result = r.isMaster
           ? await mintMaster({
               to: walletAddress,
               encryptedURI: corpusUri ?? `0g://master/${twinName ?? '2in'}`,
               signer,
+              nonce: txNonce,
             })
           : await cloneSpecialist({
               to: walletAddress,
               parentTokenId: masterTokenId ?? 42,
               encryptedURI: `0g://specialist/${r.id}`,
               signer,
+              nonce: txNonce,
             });
         if (r.isMaster) masterTokenId = result.tokenId;
+        if (nonce != null) nonce += 1;
         setRows((rs) =>
           rs.map((x) =>
             x.id === r.id
@@ -82,13 +102,9 @@ export function useMintRoster({ twinName, walletAddress, signer, corpusUri }) {
         setRunning(false);
         return;
       }
-      // Tiny gap between txs. In mock mode this just paces the reveal
-      // animation. In real mode it gives Privy's wallet nonce manager a
-      // moment to update its local counter before the next tx fires —
-      // reduces (but doesn't eliminate) nonce-too-low collisions. The
-      // explicit-nonce retry in lib/chain.js realWrite still handles
-      // the cases where 800ms isn't enough.
-      await new Promise((r) => setTimeout(r, isChainConfigured() ? 800 : 250));
+      // Tiny gap between txs. In mock mode this paces the reveal animation;
+      // in real mode it gives the RPC mempool a beat between submissions.
+      await new Promise((r) => setTimeout(r, isChainConfigured() ? 400 : 250));
       void i;
     }
     setRunning(false);

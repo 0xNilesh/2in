@@ -83,7 +83,7 @@ export async function readTwin(tokenId) {
 
 let _mockNextTokenId = 42;
 
-export async function mintMaster({ to, encryptedURI, dataHash, sealedKey, signer }) {
+export async function mintMaster({ to, encryptedURI, dataHash, sealedKey, signer, nonce }) {
   if (!isChainConfigured() || !signer) {
     return mockMintTx('mint', { to, encryptedURI, dataHash });
   }
@@ -92,10 +92,11 @@ export async function mintMaster({ to, encryptedURI, dataHash, sealedKey, signer
     functionName: 'mint',
     args: [to, dataHash ?? zeroHash(encryptedURI), encryptedURI ?? '', sealedKey ?? '0x'],
     extractTokenId: true,
+    nonce,
   });
 }
 
-export async function cloneSpecialist({ to, parentTokenId, encryptedURI, dataHash, sealedKey, signer }) {
+export async function cloneSpecialist({ to, parentTokenId, encryptedURI, dataHash, sealedKey, signer, nonce }) {
   if (!isChainConfigured() || !signer) {
     return mockMintTx('iCloneFrom', { to, parentTokenId, encryptedURI, dataHash });
   }
@@ -104,11 +105,20 @@ export async function cloneSpecialist({ to, parentTokenId, encryptedURI, dataHas
     functionName: 'iCloneFrom',
     args: [to, BigInt(parentTokenId), dataHash ?? zeroHash(encryptedURI), encryptedURI ?? '', sealedKey ?? '0x'],
     extractTokenId: true,
+    nonce,
   });
 }
 
+/** Read the chain's current pending nonce for an address. Used by callers
+ *  that fire sequential txs to avoid the wallet-nonce-manager lag. */
+export async function getPendingNonce(address) {
+  if (!isChainConfigured() || !address) return null;
+  const client = await getPublicClient();
+  return client.getTransactionCount({ address, blockTag: 'pending' });
+}
+
 // === real path ======================================================
-async function realWrite({ signer, functionName, args, extractTokenId }) {
+async function realWrite({ signer, functionName, args, extractTokenId, nonce }) {
   const client = await getPublicClient();
   const callArgs = {
     address: chainConfig.contractAddress,
@@ -116,13 +126,14 @@ async function realWrite({ signer, functionName, args, extractTokenId }) {
     functionName,
     args,
     chain: galileo,
+    // Explicit nonce when supplied — bypasses Privy's local nonce
+    // manager which lags chain state when txs are fired sequentially.
+    ...(nonce != null ? { nonce } : {}),
   };
 
-  // Sequential mints hit a wallet-nonce race: Privy's wallet manager doesn't
-  // always update its local nonce counter before we fire the next tx, so
-  // the second one reuses the first's nonce and reverts with "nonce too
-  // low". Wrap the call in a single retry that explicitly fetches the
-  // chain's current pending nonce and passes it to writeContract.
+  // Single retry on nonce errors as a safety net even when nonce was
+  // explicit. If the chain's current pending nonce doesn't match what we
+  // computed locally, refetch authoritatively.
   let txHash;
   try {
     txHash = await signer.writeContract(callArgs);
@@ -134,7 +145,7 @@ async function realWrite({ signer, functionName, args, extractTokenId }) {
     if (!sender) throw err;
     const fresh = await client.getTransactionCount({ address: sender, blockTag: 'pending' });
     // eslint-disable-next-line no-console
-    console.warn(`[chain] nonce-too-low — refetched pending nonce ${fresh}, retrying`);
+    console.warn(`[chain] nonce mismatch (sent ${nonce ?? 'auto'}, chain pending ${fresh}) — retrying`);
     txHash = await signer.writeContract({ ...callArgs, nonce: fresh });
   }
 
