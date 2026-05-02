@@ -121,8 +121,16 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/upload/list', async (req) => {
     await ensureDir();
+    // ?include=outputs (default) | uploads | all
+    const include = ((req.query as { include?: string })?.include ?? 'outputs').toLowerCase();
     const entries = await readdir(UPLOAD_DIR);
     const files = entries
+      .filter((name) => {
+        const isOutput = name.startsWith('out-');
+        if (include === 'outputs') return isOutput;
+        if (include === 'uploads') return !isOutput;
+        return true; // 'all'
+      })
       .map((name) => {
         try {
           const s = statSync(join(UPLOAD_DIR, name));
@@ -133,6 +141,7 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
             url: publicUrl(req, name),
             kind: kindOf(name),
             ext: extname(name).slice(1).toLowerCase(),
+            origin: name.startsWith('out-') ? 'output' as const : 'upload' as const,
           };
         } catch {
           return null;
@@ -141,7 +150,7 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
       .filter((f): f is NonNullable<typeof f> => f !== null)
       .sort((a, b) => b.mtime - a.mtime);
     const totalBytes = files.reduce((acc, f) => acc + f.sizeBytes, 0);
-    return { files, count: files.length, totalBytes };
+    return { files, count: files.length, totalBytes, include };
   });
 
   app.delete('/upload/file/:filename', async (req) => {
@@ -194,8 +203,10 @@ export async function resolveToLocal(urlOrPath: string): Promise<{ path: string;
   return { path: urlOrPath, cleanup: async () => {} };
 }
 
+/** Tool outputs are prefixed `out-` so the Library can filter inputs out
+ *  by default. Uploads from /api/upload (raw user files) get a bare hash. */
 export function makeOutputPath(ext: string): { path: string; filename: string } {
-  const filename = `${randomBytes(8).toString('hex')}${ext.startsWith('.') ? ext : `.${ext}`}`;
+  const filename = `out-${randomBytes(8).toString('hex')}${ext.startsWith('.') ? ext : `.${ext}`}`;
   return { path: join(UPLOAD_DIR, filename), filename };
 }
 
