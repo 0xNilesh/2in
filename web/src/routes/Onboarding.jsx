@@ -62,12 +62,13 @@ export default function Onboarding() {
 
   const canContinue = (() => {
     if (state.step === 0) return auth.authenticated;
-    // step 1: either a social platform is connected OR the questionnaire was
-    // submitted. Block while persona extraction (twitter.analyzing) is still
-    // in flight — continuing mid-extraction would skip the seeding.
+    // step 1: questionnaire is mandatory — the persona seed it produces is
+    // what the specialists actually read at chat time. X archive is an
+    // optional add-on that enriches the corpus with real tweets.
+    // Block while a twitter import is mid-extraction so we don't half-seed.
     if (state.step === 1) {
       if (state.twitter?.analyzing) return false;
-      return Boolean(state.twitter?.handle) || Boolean(state.questionnaire?.completed);
+      return Boolean(state.questionnaire?.completed);
     }
     if (state.step === 2) return Boolean(state.twinName.trim());
     return true;
@@ -214,9 +215,9 @@ function Ingest({ state, update }) {
       <div className="onboard-eyebrow">step 2 of 5</div>
       <h2 className="onboard-title">Show us your voice.</h2>
       <p className="onboard-sub">
-        Pick the path that's quickest for you — fill the personality questionnaire
-        OR drop your X archive. Either populates your twin's memory before the
-        first chat. Read-only. We never publish.
+        Fill the personality questionnaire — it seeds your twin's memory across
+        all 6 types and is required to continue. Optionally drop your X archive
+        to enrich the corpus with real tweets. Read-only. We never publish.
       </p>
 
       {/* Questionnaire — recommended primary path. */}
@@ -235,13 +236,13 @@ function Ingest({ state, update }) {
               {questionnaireDone
                 ? `seeded ${Object.values(state.questionnaire.result?.seeded ?? {}).reduce((a, b) => a + b, 0)} entries · `
                   + `${(state.questionnaire.result?.idolPacks ?? []).length} idol packs`
-                : '~3 min · 8 questions + your idols → seeds memory across all 6 types'}
+                : '~5 min · 18 questions + your idols → seeds memory across all 6 types'}
             </div>
           </div>
           {questionnaireDone ? (
             <span className="social-pill connected">connected</span>
           ) : (
-            <span className="social-pill" style={{ background: 'var(--peach-10)', color: 'var(--peach)' }}>recommended</span>
+            <span className="social-pill required">required</span>
           )}
         </div>
 
@@ -284,7 +285,7 @@ function Ingest({ state, update }) {
                   {isConnected ? (
                     <span className="social-pill connected">connected</span>
                   ) : (
-                    <span className="social-pill required">required</span>
+                    <span className="social-pill">optional</span>
                   )}
                 </div>
 
