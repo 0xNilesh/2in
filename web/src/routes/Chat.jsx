@@ -584,15 +584,16 @@ async function runMediaTool(toolName, attachment, goal, setExtension) {
   };
   const input = inputs[toolName] ?? mk();
 
-  // Pre-render an "agent" placeholder while the tool runs.
-  const slot = nowTime();
+  // Pre-render an "agent" placeholder with a live spinner while the tool runs.
+  const slot = `${nowTime()}-${Math.random().toString(36).slice(2, 6)}`;
+  const startedAt = Date.now();
   setExtension((ext) => [
     ...ext,
     {
       kind: 'agent',
       from: 'director',
       ts: slot,
-      body: { intro: [`Running ${toolName} on your attachment…`] },
+      body: { toolRunning: { tool: toolName, startedAt } },
       __pendingTool: toolName,
     },
   ]);
@@ -607,10 +608,7 @@ async function runMediaTool(toolName, attachment, goal, setExtension) {
               kind: 'agent',
               from: 'director',
               ts: slot,
-              body: {
-                intro: [`Done — ${toolName}`],
-                toolResult: { tool: toolName, input, output: out },
-              },
+              body: { toolResult: { tool: toolName, input, output: out } },
             }
           : m
       )

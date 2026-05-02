@@ -6,7 +6,7 @@
 // Body parts are arrays of strings + tagged objects ({ code }, { strong }, { ok })
 // so we can render rich inline content without dangerouslySetInnerHTML.
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Avatar } from './Avatar.jsx';
 import { TaskCard } from './TaskCard.jsx';
 import { getSpecialist } from '../data/specialists.js';
@@ -97,7 +97,54 @@ function MessageBody({ body }) {
       {body.pattern ? <PatternCard pattern={body.pattern} /> : null}
       {body.taskRef ? <TaskCard taskId={body.taskRef} /> : null}
       {body.toolResult ? <ToolResultCard {...body.toolResult} /> : null}
+      {body.toolRunning ? <ToolRunningInline {...body.toolRunning} /> : null}
     </>
+  );
+}
+
+function ToolRunningInline({ tool, startedAt }) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 500);
+    return () => clearInterval(id);
+  }, []);
+  const elapsed = startedAt ? Math.round((Date.now() - startedAt) / 100) / 10 : 0;
+  const hint = tool === 'image.edit'
+    ? 'Calling 0G qwen-image-edit-2511 — usually 20–60s'
+    : tool?.startsWith('video.') ? 'Running ffmpeg'
+    : 'Running…';
+  return (
+    <div
+      style={{
+        marginTop: 6,
+        padding: 10,
+        background: 'var(--bg)',
+        border: '1px solid var(--peach)',
+        borderRadius: 8,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+      }}
+    >
+      <div
+        style={{
+          width: 14,
+          height: 14,
+          border: '2px solid rgba(255,138,91,0.25)',
+          borderTopColor: 'var(--peach)',
+          borderRadius: '50%',
+          animation: 'msg-spin 0.8s linear infinite',
+          flexShrink: 0,
+        }}
+      >
+        <style>{'@keyframes msg-spin { to { transform: rotate(360deg) } }'}</style>
+      </div>
+      <div style={{ fontSize: 11.5, color: 'var(--text-mute)', minWidth: 0, flex: 1 }}>
+        <code style={{ color: 'var(--peach)' }}>{tool}</code>
+        <span> · {elapsed.toFixed(1)}s</span>
+        <div style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>{hint}</div>
+      </div>
+    </div>
   );
 }
 
