@@ -85,7 +85,7 @@ export default function Onboarding() {
   return (
     <div className="onboard">
       <nav className="onboard-nav">
-        <div className="brand">2<em>in</em></div>
+        <img src="/brand/logo.svg" alt="2in" width="40" height="40" style={{ display: 'block' }} />
       </nav>
 
       <div className="onboard-progress">

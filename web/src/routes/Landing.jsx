@@ -23,7 +23,7 @@ export default function Landing() {
   return (
     <div className="landing">
       <nav className="landing-nav">
-        <div className="brand">2<em>in</em></div>
+        <img src="/brand/logo.svg" alt="2in" width="40" height="40" style={{ display: 'block' }} />
         <div className="nav-links">
           <a href="#how">How it works</a>
           <a href="#team">Specialists</a>

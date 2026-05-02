@@ -128,8 +128,11 @@ export function Rail() {
   return (
     <aside className="rail">
       <header className="rail-head">
-        <div className="brand">
-          {twin.name === '2in' ? <>2<em>in</em></> : <span style={{ color: 'var(--peach)' }}>{twin.name}</span>}
+        <div className="brand" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <img src="/brand/logo.svg" alt="2in" width="32" height="32" style={{ display: 'block' }} />
+          {twin.name !== '2in' ? (
+            <span style={{ color: 'var(--peach)', fontSize: 16 }}>{twin.name}</span>
+          ) : null}
         </div>
         <button className="new" title="New chat" onClick={newChat}>+</button>
       </header>
