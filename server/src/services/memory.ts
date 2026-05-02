@@ -265,22 +265,49 @@ export async function retrieve(opts: RetrieveOptions): Promise<MemoryEntry[]> {
   }
 
   const q = opts.query?.toLowerCase().trim();
+  const queryWords = q ? q.split(/\s+/).filter((w) => w.length > 3) : [];
   const now = Date.now();
   const scored = all.map((entry) => {
-    let score = 1;
-    if (q && entry.text.toLowerCase().includes(q)) {
-      score += 5;
-      if (new RegExp(`\\b${escapeRe(q)}\\b`, 'i').test(entry.text)) score += 3;
+    let score = 0;
+    let matched = false;
+    const text = entry.text.toLowerCase();
+    if (q) {
+      // Full-phrase match (rare): big boost
+      if (text.includes(q)) {
+        score += 5;
+        matched = true;
+      }
+      // Per-word overlap — count how many goal words appear in the entry.
+      // This catches "founders" matching an entry about "founder mode"
+      // while NOT matching unrelated entries like "white scaled lizard".
+      let wordHits = 0;
+      for (const w of queryWords) {
+        if (text.includes(w)) {
+          wordHits += 1;
+          matched = true;
+        }
+      }
+      if (wordHits > 0) score += wordHits * 2;
+    } else {
+      // No query → recency-only ranking.
+      matched = true;
     }
+    if (!matched) return { entry, score: -1 };
     if (opts.preferStable && entry.stable) score += 2;
     if ((entry.reinforcement ?? 1) > 1) score += Math.log2(entry.reinforcement);
-    const ageWeeks = (now - entry.ts) / (7 * 86_400_000);
-    score -= Math.max(0, ageWeeks);
+    const ageDays = (now - entry.ts) / 86_400_000;
+    score -= Math.max(0, ageDays / 7);
+    // Tiny baseline so even an unscored matched entry beats a non-match.
+    score += 0.01;
     return { entry, score };
   });
 
-  scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, opts.limit ?? 10).map((s) => s.entry);
+  // If the caller supplied a query, only return entries that actually
+  // matched at least one word. Avoids the "no match → dump 10 recents"
+  // bug that polluted unrelated tasks with stale memory.
+  const filtered = q ? scored.filter((s) => s.score > 0) : scored;
+  filtered.sort((a, b) => b.score - a.score);
+  return filtered.slice(0, opts.limit ?? 10).map((s) => s.entry);
 }
 
 function escapeRe(s: string): string {

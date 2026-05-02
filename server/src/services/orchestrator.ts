@@ -287,6 +287,14 @@ function regexFallback(userInput: string): string {
 }
 
 export async function routePattern(userInput: string, _ctx: PromptContext): Promise<{ pattern: Pattern; source: 'qwen-classifier' | 'llm' | 'regex'; confidence?: number }> {
+  // Short-circuit when compute is already in mock/cooldown — no point
+  // burning more LLM calls on routing if the next chat turn won't even
+  // have compute available. Regex is deterministic and free.
+  if (compute.mode.kind === 'mock') {
+    const fallbackId = regexFallback(userInput);
+    return { pattern: PATTERNS[fallbackId]!, source: 'regex' };
+  }
+
   // Layer 1 — tight Qwen classifier. JSON-only, ~1.5s, returns
   // {pattern, confidence}. Cheaper than the heavier LLM router below
   // because the prompt only carries pattern IDs + short hints, not full
