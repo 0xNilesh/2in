@@ -130,9 +130,6 @@ export function Composer({ placeholder = 'Message 2in', onSend, disabled = false
           style={attachments.length > 0 ? { paddingTop: 6 } : undefined}
         />
         <div className="composer-bar">
-          <button className="icon-chip" type="button">+ memory</button>
-          <button className="icon-chip" type="button">@ address</button>
-          <button className="icon-chip" type="button">◐ pattern</button>
           <button
             className="icon-chip"
             type="button"
