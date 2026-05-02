@@ -19,6 +19,7 @@ import {
   type MemoryType,
   type MemoryEntry,
 } from './memory.js';
+import { classifyIntent } from './intent-classifier.js';
 import crypto from 'node:crypto';
 
 // Per-specialist memory routing. Each agent reads its assigned memory types
@@ -41,6 +42,10 @@ export interface PatternStep {
   agent: AgentRole;
   label: string;
   tools?: Array<{ name: string; args: Record<string, unknown> }>;
+  /** Override the agent's default system prompt for this step. Useful when
+   *  the same specialist needs a different shape per pattern (e.g. Companion
+   *  in absorb extracts facts; Companion in dm-reply chats normally). */
+  systemOverride?: string;
 }
 
 export interface Pattern {
@@ -57,7 +62,26 @@ export const PATTERNS: Record<string, Pattern> = {
     description: 'Single Companion step. Use when the user shares personal context / identity / preferences ("I\'m a YC founder", "my audience is technical founders", "my tone is terse", "remember this about me"). Companion extracts facts and writes them to semantic + relationship memory so future drafts read them back. Do NOT use for content production.',
     steps: [
       {
-        idx: 1, agent: 'companion', label: 'Absorb facts to semantic + relationship memory',
+        idx: 1, agent: 'companion', label: 'Extract facts to semantic + relationship memory',
+        systemOverride: `You are an extractor. The user has shared facts about themselves (identity, role, audience, tone, preferences, what they post about, who they work with, etc.).
+
+Your job: extract each distinct fact as a numbered list. ONE fact per line. Be terse and concrete. No prose, no questions, no follow-ups, no acknowledgments.
+
+Format EXACTLY:
+1. <fact 1>
+2. <fact 2>
+3. <fact 3>
+
+Examples of good facts:
+  - "5 years experience in web3"
+  - "builds developer tools"
+  - "posts about web3 events"
+  - "audience: technical founders 25-40"
+  - "tone: terse, contrarian, no hot takes"
+
+Skip filler: greetings, hedges, generic statements ("I think", "I want to share").
+
+Reply with ONLY the numbered list. Nothing else.`,
       },
     ],
   },
@@ -262,11 +286,21 @@ function regexFallback(userInput: string): string {
   return 'answer';
 }
 
-export async function routePattern(userInput: string, ctx: PromptContext): Promise<{ pattern: Pattern; source: 'llm' | 'regex' }> {
+export async function routePattern(userInput: string, _ctx: PromptContext): Promise<{ pattern: Pattern; source: 'hf' | 'llm' | 'regex'; confidence?: number }> {
+  // Layer 1 — zero-shot intent classifier (BART-large-mnli on HF). Cheapest,
+  // most reliable signal. Returns null if HF is cold/down or confidence < 0.55.
+  const intent = await classifyIntent(userInput);
+  if (intent && PATTERNS[intent.pattern]) {
+    // eslint-disable-next-line no-console
+    console.info(`[router] hf picked ${intent.pattern} (conf ${intent.confidence.toFixed(2)})`);
+    return { pattern: PATTERNS[intent.pattern]!, source: 'hf', confidence: intent.confidence };
+  }
+
+  // Layer 2 — LLM router (Qwen with the pattern catalog as system prompt).
+  // More expensive but uses the chat compute we already have.
   const catalog = Object.values(PATTERNS)
     .map((p) => `  - ${p.id}: ${p.description}`)
     .join('\n');
-
   try {
     const messages: ChatMessage[] = [
       { role: 'system', content: ROUTER_SYSTEM + '\n\nAvailable patterns:\n' + catalog },
@@ -288,6 +322,8 @@ export async function routePattern(userInput: string, ctx: PromptContext): Promi
     // eslint-disable-next-line no-console
     console.warn(`[router] LLM call failed (${(err as Error).message}) — falling back to regex`);
   }
+
+  // Layer 3 — regex fallback (deterministic, no network).
   const fallbackId = regexFallback(userInput);
   return { pattern: PATTERNS[fallbackId]!, source: 'regex' };
 }
@@ -432,7 +468,7 @@ async function runPattern({ taskId, initial, input }: RunArgs): Promise<void> {
     }
     lastLlmAt = Date.now();
 
-    const messages = buildMessages(step.agent, input, stepOutputs, memoryContext);
+    const messages = buildMessages(step.agent, input, stepOutputs, memoryContext, step.systemOverride);
     const stepStart = Date.now();
     let buffer = '';
 
@@ -454,28 +490,50 @@ async function runPattern({ taskId, initial, input }: RunArgs): Promise<void> {
     emit(taskId, { type: 'step.done', idx: step.idx, output, elapsed });
     stepOutputs.push({ agent: step.agent, output });
 
-    // Memory write — store a SUMMARY of the specialist's output, not the
-    // full thing. Writers + Editors output paragraphs of content; if we
-    // stored everything verbatim memory bloats fast and retrieval gets noisy.
-    // We summarise locally (no LLM cost) by trimming to the first sentence
-    // capped at ~140 chars + tagging by agent + step. Reinforcement dedupes
-    // identical summaries across runs.
+    // Memory write. Two shapes:
+    //   - absorb pattern → parse the Companion's numbered list, store each
+    //     fact as its own entry across both write types (semantic + relationship)
+    //   - other patterns → first-sentence summary, single entry to primary
+    //     write type
     if (memCfg.writes.length > 0 && output.length > 8) {
-      const writeType = memCfg.writes[0]!;
-      const summary = summariseForMemory(output, step.agent, input.goal);
       try {
-        const stored = await memEncode(
-          { kind: 'specialist-output', text: summary, source: step.agent },
-          { twinId, agent: step.agent, passthrough: { type: writeType } },
-        );
-        recordEncode(step.agent, stored);
-        emit(taskId, {
-          type: 'step.memory.write',
-          idx: step.idx,
-          agent: step.agent,
-          types: [writeType],
-          count: stored.length,
-        });
+        const facts = pattern.id === 'absorb' ? parseFactList(output) : null;
+        if (facts && facts.length > 0) {
+          // Absorb: write each fact as its own entry. Use semantic for tone/
+          // identity facts and relationship for audience/people facts.
+          let storedCount = 0;
+          for (const fact of facts) {
+            const writeType = pickAbsorbType(fact, memCfg.writes);
+            const stored = await memEncode(
+              { kind: 'specialist-output', text: fact, source: step.agent },
+              { twinId, agent: step.agent, passthrough: { type: writeType } },
+            );
+            recordEncode(step.agent, stored);
+            storedCount += stored.length;
+          }
+          emit(taskId, {
+            type: 'step.memory.write',
+            idx: step.idx,
+            agent: step.agent,
+            types: memCfg.writes,
+            count: storedCount,
+          });
+        } else {
+          const writeType = memCfg.writes[0]!;
+          const summary = summariseForMemory(output, step.agent, input.goal);
+          const stored = await memEncode(
+            { kind: 'specialist-output', text: summary, source: step.agent },
+            { twinId, agent: step.agent, passthrough: { type: writeType } },
+          );
+          recordEncode(step.agent, stored);
+          emit(taskId, {
+            type: 'step.memory.write',
+            idx: step.idx,
+            agent: step.agent,
+            types: [writeType],
+            count: stored.length,
+          });
+        }
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn(`[orchestrator] memory.encode failed for ${step.agent}: ${(err as Error).message}`);
@@ -500,8 +558,9 @@ function buildMessages(
   input: SpawnTaskInput,
   prior: Array<{ agent: AgentRole; output: string }>,
   memoryCtx: MemoryEntry[] = [],
+  systemOverride?: string,
 ): ChatMessage[] {
-  const sys = systemPrompt(agent, input.context);
+  const sys = systemOverride ?? systemPrompt(agent, input.context);
   const messages: ChatMessage[] = [{ role: 'system', content: sys }];
   messages.push({ role: 'user', content: `Goal: ${input.goal}` });
 
@@ -528,6 +587,34 @@ function buildMessages(
   }
 
   return messages;
+}
+
+// Parse the absorb pattern's expected output: a numbered list of facts.
+// Tolerant — accepts "1.", "1)", "- ", "* " prefixes; ignores empty lines
+// and lines that look like prose preambles (>240 chars, ?-ending, etc).
+function parseFactList(output: string): string[] | null {
+  const lines = output.split(/\n/).map((l) => l.trim()).filter(Boolean);
+  const facts: string[] = [];
+  for (const line of lines) {
+    const m = line.match(/^(?:\d+[.)]|[-*•])\s+(.{2,240})$/);
+    if (!m) continue;
+    const text = m[1]!.trim().replace(/[?]$/, '').replace(/^["']+|["']+$/g, '');
+    if (!text) continue;
+    facts.push(text);
+  }
+  return facts.length > 0 ? facts : null;
+}
+
+// Decide whether a fact looks like a person/audience claim (relationship)
+// or a self/style/identity claim (semantic). Default: semantic.
+function pickAbsorbType<T extends string>(fact: string, writes: T[]): T {
+  const lower = fact.toLowerCase();
+  if (writes.includes('relationship' as T)) {
+    if (/\b(audience|community|followers|customers|clients|collaborator|partner|sponsor|mentor|team)\b/.test(lower)) {
+      return 'relationship' as T;
+    }
+  }
+  return (writes.includes('semantic' as T) ? 'semantic' : writes[0]!) as T;
 }
 
 // Cheap local summariser. Pulls the first sentence (or first ~140 chars)
