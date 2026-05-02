@@ -38,6 +38,10 @@ export default function Onboarding() {
   const auth = useAuth();
   const nav = useNavigate();
 
+  // Mint progress lifted from the Mint child so canContinue can gate the
+  // step-3 Continue button on every roster member having confirmed.
+  const [mintProgress, setMintProgress] = useState({ done: false, running: false, anyFailed: false });
+
   const next = () => update({ step: Math.min(state.step + 1, STEPS.length - 1) });
   const back = () => update({ step: Math.max(state.step - 1, 0) });
 
@@ -71,6 +75,10 @@ export default function Onboarding() {
       return Boolean(state.questionnaire?.completed);
     }
     if (state.step === 2) return Boolean(state.twinName.trim());
+    // step 3: mint reveal — every roster member must confirm before advancing.
+    // Don't unlock on a partial roster; that would land users in /chat with a
+    // half-empty 2in:mints map and broken Specialist profile pages.
+    if (state.step === 3) return mintProgress.done && !mintProgress.anyFailed;
     return true;
   })();
 
@@ -104,6 +112,7 @@ export default function Onboarding() {
             twinName={state.twinName}
             twitter={state.twitter}
             walletAddress={auth.address}
+            onProgress={setMintProgress}
           />
         )}
         {state.step === 4 && <Ready twinName={state.twinName} state={state} />}
@@ -781,7 +790,7 @@ function Name({ twinName, setTwinName, twitter }) {
   );
 }
 
-function Mint({ twinName, twitter, walletAddress }) {
+function Mint({ twinName, twitter, walletAddress, onProgress }) {
   const name = twinName || '2in';
   const tweetsTrained = twitter?.tweets?.length ?? 0;
   const corpusUri = twitter?.corpus?.rootHash
@@ -813,6 +822,12 @@ function Mint({ twinName, twitter, walletAddress }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signerReady]);
+
+  // Bubble mint state up so the parent's Continue button can gate on it.
+  const anyFailed = rows.some((r) => r.status === 'failed');
+  useEffect(() => {
+    onProgress?.({ done, running, anyFailed });
+  }, [done, running, anyFailed, onProgress]);
 
   // Per-specialist subtitle. Pulls from ROSTER's trainedOn field (which is
   // already specialist-specific) and substitutes the live tweet count for
