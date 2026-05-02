@@ -10,10 +10,10 @@ import { useEffect, useState } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { ROUTES } from '../lib/routes.js';
 import { specialists } from '../data/specialists.js';
-import { directorThreads } from '../data/threads.js';
 import { user } from '../data/user.js';
 import { useTwin } from '../hooks/useTwin.js';
 import { Avatar } from '../components/Avatar.jsx';
+import { useThreads, relativeTime } from '../hooks/useThreads.js';
 
 // Persisted collapse state per section. Default the team to closed since the
 // roster is 8 long and direct subagent chat is the rarer path.
@@ -77,7 +77,7 @@ export function Rail() {
   const [twin] = useTwin();
   const nav = useNavigate();
   const loc = useLocation();
-  const threads = directorThreads();
+  const { threads, createThread } = useThreads();
   const [collapsed, setCollapsed] = useState(loadCollapsed);
 
   useEffect(() => {
@@ -90,10 +90,12 @@ export function Rail() {
   const activeThreadId = loc.pathname.startsWith('/chat/') ? loc.pathname.split('/')[2] : null;
 
   const newChat = () => {
-    // Mock: jump to the most recent thread that isn't the current one.
-    const next = threads.find((t) => t.id !== activeThreadId) ?? threads[0];
-    if (next) nav(ROUTES.chatThread(next.id));
+    const t = createThread();
+    nav(ROUTES.chatThread(t.id));
   };
+
+  // Newest first.
+  const sortedThreads = [...threads].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
 
   return (
     <aside className="rail">
@@ -106,7 +108,7 @@ export function Rail() {
 
       <div className="rail-scroll">
         <div className="section">Chats with {twin.name}</div>
-        {threads.map((t) => (
+        {sortedThreads.map((t) => (
           <NavLink
             key={t.id}
             to={ROUTES.chatThread(t.id)}
@@ -114,13 +116,9 @@ export function Rail() {
           >
             <span className="ic">◌</span>
             <span className="label thread-label">{t.title}</span>
-            <span className="id thread-when">{t.updatedAt}</span>
+            <span className="id thread-when">{relativeTime(t.updatedAt)}</span>
           </NavLink>
         ))}
-        <button className="add" onClick={newChat}>
-          <span className="ic">+</span>New chat with {twin.name}
-        </button>
-
         <CollapseHeader
           label="Your team"
           count={specialists.length}

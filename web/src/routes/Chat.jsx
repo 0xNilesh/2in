@@ -12,11 +12,11 @@ import { useParams, useSearchParams, Navigate, Link, useNavigate, useLocation } 
 import { Composer } from '../components/Composer.jsx';
 import { Message } from '../components/Message.jsx';
 import { Avatar } from '../components/Avatar.jsx';
-import { getThread, defaultDirectorThreadId, threads as seedThreads } from '../data/threads.js';
 import { useTwin } from '../hooks/useTwin.js';
 import { useStreamingChat } from '../hooks/useStreamingChat.js';
+import { useThreads, getThreadSync, deriveTitle } from '../hooks/useThreads.js';
 import { ROUTES } from '../lib/routes.js';
-import { taskApi, finetuneApi, memoryApi, chatApi } from '../lib/api.js';
+import { taskApi, finetuneApi, memoryApi, chatApi, toolsApi } from '../lib/api.js';
 import { specialists as rosterSpecialists } from '../data/specialists.js';
 import { pushToast } from '../hooks/useToasts.js';
 
@@ -38,14 +38,21 @@ export default function Chat() {
   const [twin] = useTwin();
   const nav = useNavigate();
   const [, setParams] = useSearchParams();
+  const { threads, createThread, renameThread, touchThread } = useThreads();
 
   if (!threadId) {
-    const fallback = defaultDirectorThreadId();
+    const fallback = threads[0]?.id;
     return fallback ? <Navigate to={ROUTES.chatThread(fallback)} replace /> : <Empty twin={twin} />;
   }
 
-  const seed = getThread(threadId);
-  if (!seed) return <Empty twin={twin} />;
+  const thread = threads.find((t) => t.id === threadId) ?? getThreadSync(threadId);
+  if (!thread) {
+    // ThreadId in URL but unknown — create a fresh one and redirect.
+    const t = createThread();
+    return <Navigate to={ROUTES.chatThread(t.id)} replace />;
+  }
+
+  const seed = { id: thread.id, title: thread.title, day: new Date(thread.createdAt ?? Date.now()).toDateString(), messages: [] };
 
   return (
     <ChatBody
@@ -53,9 +60,12 @@ export default function Chat() {
       threadId={threadId}
       twin={twin}
       seed={seed}
+      thread={thread}
+      onRename={(t) => renameThread(threadId, t)}
+      onTouch={() => touchThread(threadId)}
       onNewChat={() => {
-        const next = seedThreads.find((t) => t.participant === 'director' && t.id !== threadId);
-        if (next) nav(ROUTES.chatThread(next.id));
+        const t = createThread();
+        nav(ROUTES.chatThread(t.id));
       }}
       openTask={(taskId) => setParams((p) => {
         const next = new URLSearchParams(p);
@@ -73,11 +83,12 @@ function readCorpus() {
 
 const BANNER_THRESHOLD = 25; // demo dataset has 25 tweets; tune for archive uploads
 
-function ChatBody({ threadId, twin, seed, onNewChat, openTask }) {
+function ChatBody({ threadId, twin, seed, thread, onRename, onTouch, onNewChat, openTask }) {
   const [extension, setExtension] = useState(() => readExt()[threadId] ?? []);
   const { send, isStreaming, partial, error, taskCue } = useStreamingChat({ target: 'director' });
   const scrollRef = useRef(null);
   const lastTaskCueRef = useRef(null);
+  const pendingAttachmentsRef = useRef([]);
   const nav = useNavigate();
   const loc = useLocation();
   const [mode, setMode] = useState(null);
@@ -126,6 +137,9 @@ function ChatBody({ threadId, twin, seed, onNewChat, openTask }) {
 
   // If the streamed reply mentioned a known pattern, spawn the task
   // and append a TaskCard message that opens the work pane on click.
+  // Also: if the director's reply names a media tool (image.edit / video.*)
+  // AND we have attachments from the most recent send, run the tool directly
+  // and append the result inline.
   useEffect(() => {
     if (!taskCue) return;
     if (lastTaskCueRef.current === taskCue) return;
@@ -136,8 +150,17 @@ function ChatBody({ threadId, twin, seed, onNewChat, openTask }) {
       try {
         const goalMsg = [...allMessages].reverse().find((m) => m.kind === 'user');
         const goal = (goalMsg?.text && (Array.isArray(goalMsg.text) ? goalMsg.text.join(' ') : goalMsg.text)) ?? 'unspecified';
-        // taskCue '__auto__' means director used a dispatch verb but didn't
-        // name a specific pattern — let the server's LLM router pick.
+        const attachments = pendingAttachmentsRef.current ?? [];
+        pendingAttachmentsRef.current = [];
+
+        // Check if director named a media tool we can invoke directly.
+        const toolName = detectMediaTool(taskCue, partial, attachments);
+        if (toolName && attachments.length > 0) {
+          await runMediaTool(toolName, attachments[0], goal, setExtension);
+          return;
+        }
+
+        // Else: normal pattern dispatch.
         const explicitPattern = taskCue === '__auto__' ? undefined : taskCue;
         const { taskId } = await taskApi.spawn(goal, twin, explicitPattern);
         setExtension((ext) => [
@@ -153,7 +176,7 @@ function ChatBody({ threadId, twin, seed, onNewChat, openTask }) {
         openTask(taskId);
       } catch (err) {
         // eslint-disable-next-line no-console
-        console.error('spawn task failed', err);
+        console.error('spawn task / tool run failed', err);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -204,14 +227,28 @@ function ChatBody({ threadId, twin, seed, onNewChat, openTask }) {
     }
   };
 
-  const handleSend = (text) => {
+  const handleSend = (text, attachments = []) => {
+    // Auto-title the thread on its first user message.
+    if (thread && (thread.title === 'New chat' || !thread.title)) {
+      onRename?.(deriveTitle(text || (attachments[0]?.originalFilename ?? '')));
+    } else {
+      onTouch?.();
+    }
     setExtension((ext) => [
       ...ext,
-      { kind: 'user', text, ts: `${twin.name === '2in' ? '@you' : `@${twin.name}`} · ${nowTime()}` },
+      {
+        kind: 'user',
+        text,
+        attachments,
+        ts: `${twin.name === '2in' ? '@you' : `@${twin.name}`} · ${nowTime()}`,
+      },
     ]);
-    // Build the history we send to the model from prior assistant + user
-    // turns in this thread. Keep it lean — director needs the gist, not every
-    // tool message from earlier tasks.
+    // Build the history. When the user attached files, surface them in the
+    // user turn so Qwen knows what's available. Director's system prompt
+    // is augmented (server-side) to know the media tools.
+    const attachLine = attachments.length
+      ? `\n\n[attached: ${attachments.map((a) => `${a.kind ?? 'file'} ${a.url}`).join(', ')}]`
+      : '';
     const history = [
       ...seed.messages
         .filter((m) => m.kind === 'user' || (m.kind === 'agent' && m.from === 'director'))
@@ -219,9 +256,11 @@ function ChatBody({ threadId, twin, seed, onNewChat, openTask }) {
       ...extension
         .filter((m) => m.kind === 'user' || (m.kind === 'agent' && m.from === 'director'))
         .map((m) => toApiMessage(m)),
-      { role: 'user', content: text },
+      { role: 'user', content: (text || '(no text — attachment only)') + attachLine },
     ];
     lastTaskCueRef.current = null;
+    // Stash attachments so taskCue handler can pass them to the spawn.
+    pendingAttachmentsRef.current = attachments;
     send(history, { twin });
   };
 
@@ -389,4 +428,109 @@ function flatten(parts) {
 function nowTime() {
   const d = new Date();
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+// Detect a media tool name in the director's reply. Tries explicit names
+// first, then falls back to verb-based heuristics keyed off the attachment
+// kind (image vs video vs audio).
+function detectMediaTool(_cue, replyText = '', attachments = []) {
+  const text = String(replyText ?? '').toLowerCase();
+  const known = [
+    'image.edit', 'image.resize', 'image.crop', 'image.format', 'image.watermark',
+    'video.trim', 'video.reframe', 'video.burn_caption', 'video.audio_enhance',
+    'video.scene_cuts', 'video.gif', 'video.thumbnail', 'video.compress',
+    'video.probe', 'video.summarize',
+  ];
+  for (const t of known) if (text.includes(t)) return t;
+
+  // Verb fallback — only if attachment kind matches.
+  const kind = attachments[0]?.kind;
+  if (kind === 'image') {
+    if (/\b(edit|color|colour|recolor|paint|change|make it|turn it|black and white|grayscale|invert|warmer|cooler|brighter|darker|saturate|desaturate)\b/.test(text)) return 'image.edit';
+    if (/\b(resize|scale)\b/.test(text)) return 'image.resize';
+    if (/\b(crop|trim)\b/.test(text)) return 'image.crop';
+    if (/\b(watermark|sign|brand)\b/.test(text)) return 'image.watermark';
+    if (/\b(convert|format|jpg|png|webp)\b/.test(text)) return 'image.format';
+  }
+  if (kind === 'video') {
+    if (/\b(trim|cut|clip|shorten)\b/.test(text)) return 'video.trim';
+    if (/\b(reframe|9:16|1:1|portrait|square|landscape|aspect)\b/.test(text)) return 'video.reframe';
+    if (/\b(caption|subtitle|burn)\b/.test(text)) return 'video.burn_caption';
+    if (/\b(denoise|enhance audio|loudness|normali[sz]e)\b/.test(text)) return 'video.audio_enhance';
+    if (/\b(gif)\b/.test(text)) return 'video.gif';
+    if (/\b(thumbnail|frame|poster)\b/.test(text)) return 'video.thumbnail';
+    if (/\b(compress|smaller|shrink)\b/.test(text)) return 'video.compress';
+    if (/\b(scene|cuts|chapter)\b/.test(text)) return 'video.scene_cuts';
+    if (/\b(summari[sz]e|describe|what.*in)\b/.test(text)) return 'video.summarize';
+  }
+  return null;
+}
+
+async function runMediaTool(toolName, attachment, goal, setExtension) {
+  // Per-tool input shape — pick sensible defaults; advanced options later.
+  const mk = (extra = {}) => ({ fileUrl: attachment.url, ...extra });
+  const inputs = {
+    'image.edit':       mk({ instruction: goal }),
+    'image.resize':     mk({ width: 1080, format: 'jpg' }),
+    'image.crop':       mk({ width: 1080, height: 1080, x: 0, y: 0, format: 'jpg' }),
+    'image.format':     mk({ format: 'webp' }),
+    'image.watermark':  mk({ text: '2in', position: 'br', format: 'jpg' }),
+    'video.trim':       mk({ startSec: 0, endSec: 30 }),
+    'video.reframe':    mk({ aspect: '9:16', mode: 'crop' }),
+    'video.burn_caption': mk({ caption: goal.slice(0, 80), position: 'bottom' }),
+    'video.audio_enhance': mk(),
+    'video.scene_cuts': mk({ threshold: 0.35 }),
+    'video.gif':        mk({ startSec: 0, durationSec: 3, width: 480, fps: 12 }),
+    'video.thumbnail':  mk({ atSec: 1, width: 1280, format: 'jpg' }),
+    'video.compress':   mk({ crf: 28, preset: 'medium' }),
+    'video.probe':      mk(),
+    'video.summarize':  mk(),
+  };
+  const input = inputs[toolName] ?? mk();
+
+  // Pre-render an "agent" placeholder while the tool runs.
+  const slot = nowTime();
+  setExtension((ext) => [
+    ...ext,
+    {
+      kind: 'agent',
+      from: 'director',
+      ts: slot,
+      body: { intro: [`Running ${toolName} on your attachment…`] },
+      __pendingTool: toolName,
+    },
+  ]);
+
+  try {
+    const res = await toolsApi.invoke(toolName, input);
+    const out = res?.result ?? res;
+    setExtension((ext) =>
+      ext.map((m) =>
+        m.ts === slot && m.__pendingTool === toolName
+          ? {
+              kind: 'agent',
+              from: 'director',
+              ts: slot,
+              body: {
+                intro: [`Done — ${toolName}`],
+                toolResult: { tool: toolName, input, output: out },
+              },
+            }
+          : m
+      )
+    );
+  } catch (err) {
+    setExtension((ext) =>
+      ext.map((m) =>
+        m.ts === slot && m.__pendingTool === toolName
+          ? {
+              kind: 'agent',
+              from: 'director',
+              ts: slot,
+              body: { intro: [`${toolName} failed: ${err.message ?? 'unknown error'}`] },
+            }
+          : m
+      )
+    );
+  }
 }

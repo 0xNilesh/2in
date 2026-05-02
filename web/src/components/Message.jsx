@@ -96,8 +96,62 @@ function MessageBody({ body }) {
       ) : null}
       {body.pattern ? <PatternCard pattern={body.pattern} /> : null}
       {body.taskRef ? <TaskCard taskId={body.taskRef} /> : null}
+      {body.toolResult ? <ToolResultCard {...body.toolResult} /> : null}
     </>
   );
+}
+
+function ToolResultCard({ tool, input, output }) {
+  const url = output?.outputUrl ?? output?.url ?? null;
+  const kind = url ? guessMediaKind(url) : null;
+  return (
+    <div
+      style={{
+        marginTop: 8,
+        padding: 10,
+        background: 'var(--bg)',
+        border: '1px solid var(--border)',
+        borderRadius: 10,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <code style={{ fontSize: 11, color: 'var(--peach)', fontFamily: 'Geist Mono, monospace' }}>{tool}</code>
+        {input?.instruction ? (
+          <span style={{ fontSize: 11.5, color: 'var(--text-mute)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            "{input.instruction}"
+          </span>
+        ) : null}
+      </div>
+      {kind === 'image' ? (
+        <img src={url} alt="output" style={{ width: '100%', maxHeight: 320, objectFit: 'contain', borderRadius: 6, background: 'var(--bg)' }} />
+      ) : kind === 'video' ? (
+        <video src={url} controls style={{ width: '100%', maxHeight: 320, borderRadius: 6, background: '#000' }} />
+      ) : kind === 'audio' ? (
+        <audio src={url} controls style={{ width: '100%' }} />
+      ) : null}
+      {url ? (
+        <div style={{ marginTop: 6, display: 'flex', gap: 12, fontSize: 11, color: 'var(--text-faint)' }}>
+          <a href={url} target="_blank" rel="noreferrer" style={{ color: 'var(--peach)' }}>↗ open</a>
+          <a href={url} download style={{ color: 'var(--peach)' }}>↓ save</a>
+          {output?.sizeBytes ? <span>{(output.sizeBytes / 1024).toFixed(1)} KB</span> : null}
+          {output?.backend ? <span style={{ color: 'var(--mint)' }}>{output.backend}</span> : null}
+        </div>
+      ) : (
+        // No output URL — render the raw JSON for tools like scene_cuts / probe
+        <pre style={{ margin: 0, fontSize: 11, fontFamily: 'Geist Mono, monospace', color: 'var(--text-2)', maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+          {JSON.stringify(output, null, 2)}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+function guessMediaKind(url) {
+  const u = String(url).toLowerCase();
+  if (/\.(mp4|mov|webm|mkv)(\?|#|$)/.test(u)) return 'video';
+  if (/\.(png|jpg|jpeg|webp|gif|bmp|tiff)(\?|#|$)/.test(u)) return 'image';
+  if (/\.(mp3|wav|m4a|ogg|flac)(\?|#|$)/.test(u)) return 'audio';
+  return null;
 }
 
 function PatternCard({ pattern }) {
@@ -134,7 +188,29 @@ export function Message({ msg, onSavePreference }) {
       : String(msg.text ?? '');
     return (
       <div className="user-row">
-        <div className="user-bubble">{renderInline(Array.isArray(msg.text) ? msg.text : [msg.text])}</div>
+        <div className="user-bubble">
+          {renderInline(Array.isArray(msg.text) ? msg.text : [msg.text])}
+          {msg.attachments?.length ? (
+            <div style={{ marginTop: msg.text ? 8 : 0, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {msg.attachments.map((a) => (
+                a.kind === 'image' ? (
+                  <img key={a.filename} src={a.url} alt={a.originalFilename}
+                    style={{ maxWidth: 220, maxHeight: 160, borderRadius: 8, objectFit: 'cover' }} />
+                ) : a.kind === 'video' ? (
+                  <video key={a.filename} src={a.url} controls
+                    style={{ maxWidth: 260, maxHeight: 180, borderRadius: 8, background: '#000' }} />
+                ) : a.kind === 'audio' ? (
+                  <audio key={a.filename} src={a.url} controls style={{ maxWidth: 260 }} />
+                ) : (
+                  <a key={a.filename} href={a.url} target="_blank" rel="noreferrer"
+                    style={{ color: 'var(--peach)', fontSize: 12, textDecoration: 'underline' }}>
+                    {a.originalFilename}
+                  </a>
+                )
+              ))}
+            </div>
+          ) : null}
+        </div>
         <div className="meta" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <span>{msg.ts}</span>
           <CopyButton text={text} />
