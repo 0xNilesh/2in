@@ -436,29 +436,30 @@ Examples:
   "neon look"                → eq=saturation=2:contrast=1.4:brightness=0.05,hue=h=20
   "darker and moodier"       → eq=brightness=-0.18:saturation=0.85:contrast=1.25,vignette`;
 
-/** Resolve the dedicated image-edit endpoint. Returns null if not configured. */
+/** Resolve the dedicated image-edit endpoint. Returns null if not configured.
+ *  Accepts either a base URL OR a full endpoint URL in PROVIDER_URL —
+ *  appends `/v1/proxy/images/edits` only if not already there. */
 async function imageEditEndpoint(): Promise<string | null> {
   if (!config.ZG_IMAGE_EDIT_API_KEY) return null;
-  if (config.ZG_IMAGE_EDIT_PROVIDER_URL) {
-    return `${config.ZG_IMAGE_EDIT_PROVIDER_URL.replace(/\/$/, '')}/v1/proxy/images/generations`;
-  }
+  const ensurePath = (url: string): string => {
+    const trimmed = url.replace(/\/$/, '');
+    if (/\/v1\/proxy\/images\/(edits|generations)$/.test(trimmed)) return trimmed;
+    return `${trimmed}/v1/proxy/images/edits`;
+  };
+  if (config.ZG_IMAGE_EDIT_PROVIDER_URL) return ensurePath(config.ZG_IMAGE_EDIT_PROVIDER_URL);
   if (config.ZG_IMAGE_EDIT_PROVIDER_ADDRESS) {
     const base = await resolveProviderUrl(config.ZG_IMAGE_EDIT_PROVIDER_ADDRESS);
-    return `${base}/v1/proxy/images/generations`;
+    return ensurePath(base);
   }
   return null;
 }
 
-/** Encode a local image file as a data: URL — what the qwen-image-edit
- *  payload typically expects when no fetchable URL is available. */
-async function fileToDataUrl(path: string): Promise<string> {
-  const buf = await readFile(path);
+function mimeFromExt(path: string): string {
   const ext = extname(path).slice(1).toLowerCase() || 'png';
-  const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
+  return ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
     : ext === 'webp' ? 'image/webp'
     : ext === 'gif' ? 'image/gif'
     : 'image/png';
-  return `data:${mime};base64,${buf.toString('base64')}`;
 }
 
 /** Image edit. Two backends, tried in order:
@@ -479,120 +480,129 @@ export const imageEdit: Tool = {
   }),
   execute: async (input, ctx) => {
     // === Backend 1: real qwen-image-edit-2511 ============================
+    // The provider implements OpenAI's image-EDITS shape (multipart with the
+    // source image as a binary file field). The /generations endpoint is
+    // disabled on this specific provider.
     const endpoint = await imageEditEndpoint();
     if (endpoint) {
       const src = await resolveToLocal(input.fileUrl);
       try {
-        // Try a few common payload shapes. The 0G docs example shows a
-        // bare /images/generations call, but the model is labelled "Image
-        // Editing" so we attempt to pass the source image too — the
-        // provider accepts whichever field its handler implements.
-        const dataUrl = await fileToDataUrl(src.path);
-        const baseBody = {
-          model: config.ZG_IMAGE_EDIT_MODEL,
-          prompt: input.instruction,
-          n: 1,
-          size: '1024x1024',
-          response_format: 'b64_json',
-        };
-        const variants = [
-          { ...baseBody, image: dataUrl },          // common openai-edit shape
-          { ...baseBody, image_url: dataUrl },      // alt naming
-          { ...baseBody, init_image: dataUrl },     // diffusers-style
-          baseBody,                                  // last resort: prompt only (re-render)
-        ];
-        let lastErr: string | null = null;
-        for (const body of variants) {
-          try {
-            const res = await fetch(endpoint, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${config.ZG_IMAGE_EDIT_API_KEY}`,
-              },
-              body: JSON.stringify(body),
-            });
-            if (!res.ok) {
-              const text = await res.text().catch(() => '');
-              lastErr = `${res.status} ${text.slice(0, 180)}`;
-              continue;
-            }
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const j = (await res.json()) as any;
-            const b64 = j?.data?.[0]?.b64_json;
-            const url = j?.data?.[0]?.url;
-            if (!b64 && !url) {
-              lastErr = `unexpected response shape: ${JSON.stringify(j).slice(0, 180)}`;
-              continue;
-            }
-            const out = makeOutputPath('.png');
-            if (b64) {
-              await writeFile(out.path, Buffer.from(b64, 'base64'));
-            } else {
-              const r2 = await fetch(url);
-              if (!r2.ok) throw new Error(`fetch generated image: ${r2.status}`);
-              await writeFile(out.path, Buffer.from(await r2.arrayBuffer()));
-            }
-            const size = await fileSize(out.path);
-            return {
-              outputUrl: publicUrl(out.filename, ctx),
-              filename: out.filename,
-              sizeBytes: size,
-              instruction: input.instruction,
-              backend: 'qwen-image-edit-2511',
-              shape: Object.keys(body).find((k) => k === 'image' || k === 'image_url' || k === 'init_image') ?? 'prompt-only',
-            };
-          } catch (err) {
-            lastErr = (err as Error).message;
+        const buf = await readFile(src.path);
+        const mime = mimeFromExt(src.path);
+        const filenameForUpload = `input.${extname(src.path).slice(1) || 'png'}`;
+        const fd = new FormData();
+        fd.append('image', new Blob([buf], { type: mime }), filenameForUpload);
+        fd.append('prompt', input.instruction);
+        fd.append('model', config.ZG_IMAGE_EDIT_MODEL);
+        fd.append('n', '1');
+        fd.append('size', '1024x1024');
+        fd.append('response_format', 'b64_json');
+
+        try {
+          const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${config.ZG_IMAGE_EDIT_API_KEY}` },
+            body: fd,
+          });
+          if (!res.ok) {
+            const text = await res.text().catch(() => '');
+            throw new Error(`${res.status} ${text.slice(0, 200)}`);
           }
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const j = (await res.json()) as any;
+          const b64 = j?.data?.[0]?.b64_json;
+          const url = j?.data?.[0]?.url;
+          if (!b64 && !url) {
+            throw new Error(`unexpected response shape: ${JSON.stringify(j).slice(0, 200)}`);
+          }
+          const out = makeOutputPath('.png');
+          if (b64) {
+            await writeFile(out.path, Buffer.from(b64, 'base64'));
+          } else {
+            const r2 = await fetch(url);
+            if (!r2.ok) throw new Error(`fetch generated image: ${r2.status}`);
+            await writeFile(out.path, Buffer.from(await r2.arrayBuffer()));
+          }
+          const size = await fileSize(out.path);
+          return {
+            outputUrl: publicUrl(out.filename, ctx),
+            filename: out.filename,
+            sizeBytes: size,
+            instruction: input.instruction,
+            backend: 'qwen-image-edit-2511',
+          };
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn(`[image.edit] qwen-image-edit failed (${(err as Error).message}) — falling back to ffmpeg`);
         }
-        // eslint-disable-next-line no-console
-        console.warn(`[image.edit] qwen-image-edit endpoint exhausted variants — last err: ${lastErr ?? 'unknown'} — falling back to ffmpeg`);
       } finally {
         await src.cleanup();
       }
     }
 
     // === Backend 2: ffmpeg-filter via Qwen translator ======================
-    let filter = '';
-    try {
+    const askForFilter = async (extraGuidance?: string): Promise<string> => {
       const j = await compute.completionRaw({
         model: config.SPECIALIST_MODEL ?? config.DIRECTOR_MODEL,
         messages: [
           { role: 'system', content: FILTER_TRANSLATOR_SYSTEM },
-          { role: 'user', content: input.instruction },
+          { role: 'user', content: extraGuidance
+            ? `${input.instruction}\n\nIMPORTANT: ${extraGuidance}`
+            : input.instruction },
         ],
         max_tokens: 200,
         temperature: 0.2,
       }) as { choices?: Array<{ message?: { content?: string } }> };
-      filter = (j.choices?.[0]?.message?.content ?? '').trim();
-      filter = filter.replace(/^```\w*\s*|\s*```$/g, '').trim();
-      filter = filter.replace(/^filter[:=]\s*/i, '').trim();
-      filter = filter.replace(/^["'`]+|["'`]+$/g, '').trim();
-      filter = filter.split(/\n/)[0]!.trim();
-    } catch (err) {
-      throw new ToolError(`image.edit translator failed: ${(err as Error).message}`);
-    }
-    if (!filter) throw new ToolError('image.edit: empty filter from translator');
+      let raw = (j.choices?.[0]?.message?.content ?? '').trim();
+      raw = raw.replace(/^```\w*\s*|\s*```$/g, '').trim();
+      raw = raw.replace(/^filter[:=]\s*/i, '').trim();
+      raw = raw.replace(/^["'`]+|["'`]+$/g, '').trim();
+      raw = raw.split(/\n/)[0]!.trim();
+      return raw;
+    };
 
     const src = await resolveToLocal(input.fileUrl);
     const out = makeOutputPath('.jpg');
     try {
-      await applyImageFilter(src.path, out.path, filter);
-      const size = await fileSize(out.path);
-      return {
-        outputUrl: publicUrl(out.filename, ctx),
-        filename: out.filename,
-        sizeBytes: size,
-        filter,
-        instruction: input.instruction,
-        backend: 'ffmpeg-filter',
-        note: endpoint
-          ? 'qwen-image-edit endpoint failed — fell back to global ffmpeg filter'
-          : 'qwen-image-edit not configured (set ZG_IMAGE_EDIT_API_KEY + ZG_IMAGE_EDIT_PROVIDER_URL/ADDRESS) — using ffmpeg filter',
-      };
-    } catch (err) {
-      throw new ToolError(`image.edit failed: ${(err as Error).message} (filter was: ${filter})`);
+      let filter = '';
+      let lastErr = '';
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const guidance = attempt === 0
+          ? undefined
+          : `Your previous filter "${filter}" failed with: ${lastErr}. Pick DIFFERENT filters and stay STRICTLY within parameter ranges. Avoid colorize unless you know saturation<=1.`;
+        try {
+          filter = await askForFilter(guidance);
+        } catch (err) {
+          throw new ToolError(`translator failed: ${(err as Error).message}`);
+        }
+        if (!filter) {
+          lastErr = 'empty filter from translator';
+          continue;
+        }
+        try {
+          await applyImageFilter(src.path, out.path, filter);
+          const size = await fileSize(out.path);
+          return {
+            outputUrl: publicUrl(out.filename, ctx),
+            filename: out.filename,
+            sizeBytes: size,
+            filter,
+            instruction: input.instruction,
+            backend: 'ffmpeg-filter',
+            attempts: attempt + 1,
+            note: endpoint
+              ? 'qwen-image-edit endpoint disabled by provider — used ffmpeg filter'
+              : 'qwen-image-edit not configured — using ffmpeg filter',
+          };
+        } catch (err) {
+          lastErr = (err as Error).message;
+          // Strip ffmpeg's verbose preamble for the retry hint.
+          lastErr = lastErr.split(/Error|out of range/).slice(0, 2).join(' ').slice(-200);
+          // eslint-disable-next-line no-console
+          console.warn(`[image.edit] attempt ${attempt + 1} failed (filter=${filter}): ${lastErr}`);
+        }
+      }
+      throw new ToolError(`ffmpeg filter rejected after 2 attempts. Last filter: "${filter}". Last error: ${lastErr}`);
     } finally {
       await src.cleanup();
     }
