@@ -110,13 +110,34 @@ export async function cloneSpecialist({ to, parentTokenId, encryptedURI, dataHas
 // === real path ======================================================
 async function realWrite({ signer, functionName, args, extractTokenId }) {
   const client = await getPublicClient();
-  const txHash = await signer.writeContract({
+  const callArgs = {
     address: chainConfig.contractAddress,
     abi: TWIN_INFT_ABI,
     functionName,
     args,
     chain: galileo,
-  });
+  };
+
+  // Sequential mints hit a wallet-nonce race: Privy's wallet manager doesn't
+  // always update its local nonce counter before we fire the next tx, so
+  // the second one reuses the first's nonce and reverts with "nonce too
+  // low". Wrap the call in a single retry that explicitly fetches the
+  // chain's current pending nonce and passes it to writeContract.
+  let txHash;
+  try {
+    txHash = await signer.writeContract(callArgs);
+  } catch (err) {
+    const msg = String(err?.message ?? '').toLowerCase();
+    const isNonce = msg.includes('nonce too low') || msg.includes('nonce too high') || msg.includes('replacement transaction');
+    if (!isNonce) throw err;
+    const sender = signer.account?.address ?? signer.address;
+    if (!sender) throw err;
+    const fresh = await client.getTransactionCount({ address: sender, blockTag: 'pending' });
+    // eslint-disable-next-line no-console
+    console.warn(`[chain] nonce-too-low — refetched pending nonce ${fresh}, retrying`);
+    txHash = await signer.writeContract({ ...callArgs, nonce: fresh });
+  }
+
   // writeContract returning a hash means the tx was accepted by the RPC.
   // After that, getTransactionReceipt may take a long time on Galileo
   // because the receipt indexer lags the chain head. We try our best to

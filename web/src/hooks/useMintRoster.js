@@ -82,11 +82,13 @@ export function useMintRoster({ twinName, walletAddress, signer, corpusUri }) {
         setRunning(false);
         return;
       }
-      // Tiny gap between txs so the reveal feels paced (only in mock — the
-      // real path's network latency provides its own pacing).
-      if (!isChainConfigured()) {
-        await new Promise((r) => setTimeout(r, 250));
-      }
+      // Tiny gap between txs. In mock mode this just paces the reveal
+      // animation. In real mode it gives Privy's wallet nonce manager a
+      // moment to update its local counter before the next tx fires —
+      // reduces (but doesn't eliminate) nonce-too-low collisions. The
+      // explicit-nonce retry in lib/chain.js realWrite still handles
+      // the cases where 800ms isn't enough.
+      await new Promise((r) => setTimeout(r, isChainConfigured() ? 800 : 250));
       void i;
     }
     setRunning(false);
