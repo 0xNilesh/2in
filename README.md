@@ -1,8 +1,14 @@
-# 2in
+<p align="center">
+  <img src="https://2in.vercel.app/brand/logo.svg" alt="2in" width="120" height="120" />
+</p>
 
-A digital twin you actually own — a director + roster of role-typed
-specialist iNFTs that draft, research, edit and remember in your voice,
-backed end-to-end by the 0G stack (Chain · Compute · Storage).
+<h1 align="center">2in</h1>
+
+<p align="center">
+  A digital twin you actually own — a director + roster of role-typed
+  specialist iNFTs that draft, research, edit and remember in your voice,
+  backed end-to-end by the 0G stack (Chain · Compute · Storage).
+</p>
 
 | | |
 |---|---|
