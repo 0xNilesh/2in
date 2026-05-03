@@ -16,7 +16,7 @@ import {
   probeMeta, fileSize, applyImageFilter,
   type Aspect,
 } from '../media.js';
-import { resolveToLocal, makeOutputPath } from '../../routes/upload.js';
+import { resolveToLocal, makeOutputPath, persistOutputToZeroG } from '../../routes/upload.js';
 import { compute } from '../compute.js';
 import { config } from '../../config.js';
 import { resolveProviderUrl } from '../provider-lookup.js';
@@ -26,12 +26,19 @@ import { ToolError, type Tool, type ToolContext } from './types.js';
 
 const ASPECTS = ['9:16', '1:1', '16:9'] as const;
 
-// Return a server-relative path. The client wraps it with VITE_API_BASE
-// (apiUrl helper) so the link always points at the right backend host —
-// localhost in dev, the Render URL in prod — without us needing to know
-// our own public URL at tool-runtime.
-function publicUrl(filename: string, ctx: ToolContext): string {
+// Return a server-relative path AND mirror the file to 0G Storage in the
+// background so it survives Render's ephemeral /tmp wipe. The client wraps
+// the relative URL with VITE_API_BASE (apiUrl helper); the file-serving
+// endpoint serves locally if /tmp still has it, else 302-redirects to the
+// 0G gateway URL via the KV pointer this writes.
+//
+// Best-effort: persist runs in the background so tool calls don't slow
+// down by 1–2s waiting on a blob upload. If the server dies before the
+// upload completes, we lose only that one output's durability — the local
+// /tmp copy still serves until the process restarts.
+function publicUrl(filename: string, ctx: ToolContext, contentType?: string): string {
   void ctx;
+  void persistOutputToZeroG(filename, contentType);
   return `/api/upload/file/${encodeURIComponent(filename)}`;
 }
 

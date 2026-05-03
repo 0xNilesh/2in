@@ -9,14 +9,54 @@
 
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { createWriteStream, createReadStream, existsSync, statSync } from 'node:fs';
-import { writeFile, readdir, rm, mkdir } from 'node:fs/promises';
+import { writeFile, readFile, readdir, rm, mkdir } from 'node:fs/promises';
 import { join, extname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes, createHash } from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
+import { storage } from '../services/storage.js';
 
 const UPLOAD_DIR = join(tmpdir(), '2in-uploads');
 const MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB cap before LRU eviction
+const UPLOAD_KV_STREAM = 'twin:42:upload';
+
+interface UploadKvRecord {
+  filename: string;
+  rootHash: string;
+  kind: 'image' | 'video' | 'audio' | 'other';
+  ext: string;
+  sizeBytes: number;
+  mtime: number;
+  contentType?: string;
+}
+
+/** Mirror a freshly-written /tmp output to 0G Indexer + record a pointer in
+ *  0G KV so the file survives Render's ephemeral-disk wipe. Best-effort:
+ *  failure here doesn't fail the tool, the local copy still serves. */
+export async function persistOutputToZeroG(filename: string, contentType?: string): Promise<void> {
+  try {
+    const path = join(UPLOAD_DIR, filename);
+    if (!existsSync(path)) return;
+    const buf = await readFile(path);
+    const stat = statSync(path);
+    const result = await storage.uploadBlob(buf, { contentType });
+    const record: UploadKvRecord = {
+      filename,
+      rootHash: result.rootHash,
+      kind: kindOf(filename),
+      ext: extname(filename).slice(1).toLowerCase(),
+      sizeBytes: stat.size,
+      mtime: stat.mtimeMs,
+      contentType,
+    };
+    await storage.writeKv(UPLOAD_KV_STREAM, filename, JSON.stringify(record));
+    // eslint-disable-next-line no-console
+    console.info(`[upload] persisted ${filename} → 0G root ${result.rootHash}`);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(`[upload] persistOutputToZeroG failed for ${filename}:`, (err as Error)?.message);
+  }
+}
 
 async function ensureDir(): Promise<void> {
   if (!existsSync(UPLOAD_DIR)) await mkdir(UPLOAD_DIR, { recursive: true });
@@ -102,47 +142,96 @@ export async function uploadRoutes(app: FastifyInstance): Promise<void> {
     // Path safety: only basename, no traversal.
     const safe = basename(filename);
     const path = join(UPLOAD_DIR, safe);
-    if (!existsSync(path)) throw app.httpErrors.notFound(`No file: ${safe}`);
-    const ext = extname(safe).toLowerCase();
-    const mime =
-      ext === '.mp4' ? 'video/mp4' :
-      ext === '.mov' ? 'video/quicktime' :
-      ext === '.webm' ? 'video/webm' :
-      ext === '.gif' ? 'image/gif' :
-      ext === '.png' ? 'image/png' :
-      ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
-      ext === '.webp' ? 'image/webp' :
-      ext === '.mp3' ? 'audio/mpeg' :
-      ext === '.wav' ? 'audio/wav' :
-      'application/octet-stream';
-    reply.header('content-type', mime);
-    reply.header('cache-control', 'public, max-age=300');
-    return reply.send(createReadStream(path));
+
+    // Fast path: file exists locally → stream directly.
+    if (existsSync(path)) {
+      const ext = extname(safe).toLowerCase();
+      const mime =
+        ext === '.mp4' ? 'video/mp4' :
+        ext === '.mov' ? 'video/quicktime' :
+        ext === '.webm' ? 'video/webm' :
+        ext === '.gif' ? 'image/gif' :
+        ext === '.png' ? 'image/png' :
+        ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
+        ext === '.webp' ? 'image/webp' :
+        ext === '.mp3' ? 'audio/mpeg' :
+        ext === '.wav' ? 'audio/wav' :
+        'application/octet-stream';
+      reply.header('content-type', mime);
+      reply.header('cache-control', 'public, max-age=300');
+      return reply.send(createReadStream(path));
+    }
+
+    // Fallback: local /tmp got wiped (Render cold start). Look up the
+    // 0G KV pointer and 302 to the gateway URL — the browser fetches
+    // the durable copy from 0G Indexer directly.
+    try {
+      const raw = await storage.readKv(UPLOAD_KV_STREAM, safe);
+      if (raw) {
+        const rec = JSON.parse(raw) as UploadKvRecord;
+        const gatewayUrl = storage.gatewayUrl(rec.rootHash);
+        reply.header('cache-control', 'public, max-age=300');
+        return reply.redirect(gatewayUrl, 302);
+      }
+    } catch { /* fall through to 404 */ }
+    throw app.httpErrors.notFound(`No file: ${safe}`);
   });
 
   app.get('/upload/list', async (req) => {
     await ensureDir();
     // ?include=outputs (default) | uploads | all
     const include = ((req.query as { include?: string })?.include ?? 'outputs').toLowerCase();
+
+    // Local files (fast — these serve directly from /tmp).
     const entries = await readdir(UPLOAD_DIR);
-    const files = entries
-      .map((name) => {
-        try {
-          const s = statSync(join(UPLOAD_DIR, name));
-          return {
-            name,
-            sizeBytes: s.size,
-            mtime: s.mtimeMs,
-            url: publicUrl(req, name),
-            kind: kindOf(name),
-            ext: extname(name).slice(1).toLowerCase(),
-            origin: classifyOrigin(name),
-          };
-        } catch {
-          return null;
-        }
-      })
-      .filter((f): f is NonNullable<typeof f> => f !== null)
+    const localFiles = new Map<string, {
+      name: string; sizeBytes: number; mtime: number; url: string;
+      kind: string; ext: string; origin: string; durable: boolean;
+    }>();
+    for (const name of entries) {
+      try {
+        const s = statSync(join(UPLOAD_DIR, name));
+        localFiles.set(name, {
+          name,
+          sizeBytes: s.size,
+          mtime: s.mtimeMs,
+          url: publicUrl(req, name),
+          kind: kindOf(name),
+          ext: extname(name).slice(1).toLowerCase(),
+          origin: classifyOrigin(name),
+          durable: false, // overwritten below if KV has it too
+        });
+      } catch { /* skip */ }
+    }
+
+    // KV-backed durable index (survives restarts via 0G Indexer blob).
+    // Merge: prefer local entries (faster serving) but flag `durable: true`
+    // when a KV record also exists. Add KV-only entries when local missing.
+    let kvEntries: Awaited<ReturnType<typeof storage.listKv>> = [];
+    try { kvEntries = await storage.listKv(UPLOAD_KV_STREAM); } catch { /* tolerate */ }
+    for (const e of kvEntries) {
+      let rec: UploadKvRecord;
+      try { rec = JSON.parse(e.value) as UploadKvRecord; } catch { continue; }
+      if (localFiles.has(rec.filename)) {
+        const existing = localFiles.get(rec.filename)!;
+        existing.durable = true;
+      } else {
+        localFiles.set(rec.filename, {
+          name: rec.filename,
+          sizeBytes: rec.sizeBytes,
+          mtime: rec.mtime,
+          // Same URL shape — /api/upload/file/:name — endpoint handles
+          // missing-locally-but-on-0G via 302 redirect to the gateway.
+          url: publicUrl(req, rec.filename),
+          kind: rec.kind,
+          ext: rec.ext,
+          origin: classifyOrigin(rec.filename),
+          durable: true,
+        });
+      }
+    }
+
+    const files = Array.from(localFiles.values())
       .filter((f) => {
         if (include === 'outputs') return f.origin !== 'upload';
         if (include === 'uploads') return f.origin === 'upload';
