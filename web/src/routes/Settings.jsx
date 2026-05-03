@@ -27,7 +27,7 @@ import { chainApi, apiUrl } from '../lib/api.js';
 import { pushToast } from '../hooks/useToasts.js';
 import { getTwinId } from '../data/specialists.js';
 
-const ORCHESTRATOR_DELEGATE = '0x91ab2f7d000000000000000000000000000002f7d1'; // demo hot wallet placeholder
+const ORCHESTRATOR_DELEGATE = '0x91ab2f7d0000000000000000000000000000f7d1'; // demo hot wallet placeholder (40 hex chars, lowercase — viem-strict)
 
 function getMasterTokenId() {
   try {
