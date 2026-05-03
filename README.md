@@ -4,12 +4,12 @@ A digital twin you actually own — a director + roster of role-typed
 specialist iNFTs that draft, research, edit and remember in your voice,
 backed end-to-end by the 0G stack (Chain · Compute · Storage).
 
-> **Track:** 0G APAC Hackathon — _Best Autonomous Agents, Swarms & iNFT Innovations_.
-
 | | |
 |---|---|
 | **Live demo** | https://2in.vercel.app |
+| **Demo video (≤ 3 min)** | _add YouTube / Loom URL after recording_ |
 | **TwinINFT contract (Galileo · 16602)** | [`0xf454c04ee5365f9a195a00267e4a1dba6a7b9395`](https://chainscan-galileo.0g.ai/address/0xf454c04ee5365f9a195a00267e4a1dba6a7b9395) |
+| **Live minted iNFT (master twin · example)** | [`tokenId 19`](https://chainscan-galileo.0g.ai/token/0xf454c04ee5365f9a195a00267e4a1dba6a7b9395?a=19) — owner's master, snapshot history visible on chain |
 | **Explorer** | https://chainscan-galileo.0g.ai |
 | **Source** | this repo |
 
@@ -191,8 +191,6 @@ non-starter. A single Indexer blob fetch hydrates the entire cache in
 ~1 s, and the rolling snapshot pointer (`twin:<id>:meta:cache-snapshot`)
 fits in one fast `getValue` call.
 
-### Conversation log on 0G Storage
-
 Every chat message triggers a debounced (1.5 s) snapshot upload:
 
 1. Client serialises `{id, title, createdAt, updatedAt, messages, tasks}`
@@ -275,6 +273,69 @@ everything important re-hydrates from 0G on next mount.
 └── package.json               root concurrently runner (`npm run dev` boots web + server)
 ```
 
+### Swarm coordination — how the agents talk
+
+The director and the eight specialists never share a freeform conversation —
+all coordination is **typed, mediated by the orchestrator, and routed
+through 0G KV memory** so it's auditable + restorable. Concretely:
+
+```
+user message
+    ↓
+director (Qwen) reads:
+   - last 10 turns of the thread
+   - per-thread summary (Qwen-rolled, cached client-side)
+   - RAG over 0G-KV memory (per-word match across slices)
+    ↓
+intent-classifier picks one of 11 patterns (or director names it directly)
+    ↓
+orchestrator.ts walks the pattern's typed step plan:
+
+   step 1 → Researcher
+              reads:  episodic + temporal slices       (0G KV)
+              writes: semantic + episodic slices       (0G KV)
+              passes summary + chat history to Qwen
+              emits StepResult with cost + tool calls
+    ↓
+   step 2 → Writer
+              reads:  semantic + episodic + temporal   (0G KV)
+              + reads Researcher's StepResult from working memory
+              writes: episodic                         (0G KV)
+    ↓
+   step 3 → Editor (only on patterns that need it)
+              reads:  procedural (rejection ledger) + semantic
+              outputs SHIP <draft>  OR  EDIT <revised draft>
+              writes: procedural                       (0G KV)
+    ↓
+WorkPane streams every step + cost + memory delta over SSE
+    ↓
+user approves → final attribution to Writer (not Editor)
+              → procedural memory write                (0G KV)
+              → snapshot threshold tripped?
+                    yes → updateMetadata(tokenId, dataHash, encryptedURI)
+                    on chain (0G Chain)
+```
+
+**Three coordination invariants:**
+
+1. **No specialist talks to another specialist directly.** Everything flows
+   through the director's typed step plan and through the shared 0G-KV
+   memory. Each StepResult is a structured object passed to the next step,
+   not free text.
+2. **Memory access is typed at the role level** (see the roster table). The
+   Writer cannot write to procedural; only the Editor can. The Researcher
+   cannot write to relationship; only the Companion can. This prevents
+   cross-pollination of memory provenance and keeps slice integrity.
+3. **Every coordination step is provable.** The pattern + step + memory
+   delta + tx hash all stream over SSE to WorkPane and persist via the
+   conversation snapshot to 0G Indexer — so judges can reconstruct the
+   full agent dialogue from the on-chain pointer alone.
+
+Patterns are versioned in `services/orchestrator.ts`; new ones require a
+typed step plan + per-step memory access whitelist. The Qwen
+intent-classifier is the routing fallback; explicit pattern names from the
+director short-circuit it.
+
 ### Three-layer chat context
 
 Every chat call assembles three layers of context before the model sees it:
@@ -351,19 +412,24 @@ specialist or chat writes → memory.write(slice, value, attribution)
 
 ---
 
-## Honest scope: what's NOT shipped
+## Future scope
 
-We pulled or visibly disabled features we couldn't ship cleanly:
+Where the product is heading once the hackathon scope ships. Every item
+below has a placeholder surface in the UI today (visibly disabled with a
+`soon` tag) so users can see the roadmap without us pretending it works.
 
-- **Per-specialist LoRA fine-tuning** — promised in earlier drafts; the prompt-engineered specialists carry the demo today
-- **"Train new specialist"** flow — removed from the rail
-- **Twitter / LinkedIn / Substack / YouTube / Spotify / Instagram / Notion / Google Drive** OAuth ingest — surfaced as visibly-disabled rows in Settings → Connected sources with a `soon` tag, not as fake-working buttons
-- **Mainnet-only compute models** (`whisper-large-v3`, `z-image`, `qwen3-vl`) — visibly disabled on the Tools page with `needs 0G mainnet · soon` pills + the model name shown
-- **Private mode (TeeML routing)**, **multichain switching**, **handle ENS edit** — disabled with `soon` indicators in Settings
-- **Royalty splits on usage** — out of scope for the demo
-- **`authorizeUsage()` UI** — exposed in the ABI; no surface yet (delegate flow covers the orchestrator-runs-24/7 use case)
+- **Per-specialist LoRA fine-tuning** — train a tiny adapter per specialist on the user's typed slice + chat corpus, ship via 0G Compute fine-tune; current prompt-engineered specialists become the cold-start baseline.
+- **Custom specialist creation** — name + base prompt + memory-slice routing → `iCloneFrom` mints a new role-typed iNFT under the user's wallet. Lays the groundwork for a marketplace of community specialist templates.
+- **Direct social ingest** (Twitter / LinkedIn / Substack / YouTube / Spotify / Instagram / Notion / Google Drive) — replace the manual archive drop with OAuth pipes that keep the corpus fresh. Each source is already wired to a target specialist (e.g. YouTube transcripts → Voice).
+- **Mainnet compute models** — `openai/whisper-large-v3` (transcribe), `z-image` (text-to-image), `qwen/qwen3-vl-30b-a3b-instruct` (vision Q&A + `video.summarize`). The Tools-page rows already show the model id + pricing so the wiring is one provider URL away.
+- **Private mode (TeeML routing)** — route every Compute call through TEE-attested providers + verify signatures client-side. Settings toggle is built; needs the TeeML provider list.
+- **Multichain switching** — Galileo today, expand once 0G mainnet is live and other chains are bridged.
+- **Handle / ENS resolution** — display the user's ENS or chosen handle in place of the truncated address.
+- **`authorizeUsage()` royalty flow** — per-twin authorization for paid third-party access, with usage telemetry feeding a revenue split. ABI is exposed; UI + accounting layer pending.
+- **Conversation log on 0G DA** — once the DA disperser exposes a public testnet endpoint or a JS SDK lands, swap the Indexer-blob substrate for the DA-Log primitive with no caller changes (the `storage.uploadBlob` interface already isolates it).
 
-Principle throughout: don't ship UI we can't deliver.
+Principle throughout: don't ship UI we can't deliver — every "coming soon"
+above is wired, just gated.
 
 ---
 
@@ -425,6 +491,17 @@ code); switch to Fly.io free or Railway to remove it.
 | iNFT with embedded intelligence (ERC-7857) | `contracts/src/TwinINFT.sol` — `mint`, `iCloneFrom`, `safeTransferFrom`, `updateMetadata`, `delegateAccess`, `authorizeUsage` |
 | Composability + ownership | Each specialist is its own iNFT under the user's wallet — transferable, delegatable, snapshot-anchored |
 | Emergent / novel paradigms | User-named director, idol-based voice seeding, 6-slice memory architecture, per-task pattern dispatch, conversation log on 0G Storage |
+
+---
+
+## Team
+
+| Name | Role | Telegram | X |
+|---|---|---|---|
+| _Nilesh_ | _Dev_ | _@nileshgupta46_ | _@0xnilesj_ |
+
+_Add your team here before submission._
+
 
 ---
 
