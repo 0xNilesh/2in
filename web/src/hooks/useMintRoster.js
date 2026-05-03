@@ -7,6 +7,7 @@
 
 import { useCallback, useState } from 'react';
 import { mintMaster, cloneSpecialist, getPendingNonce, isChainConfigured } from '../lib/chain.js';
+import { setScoped } from '../lib/scoped-storage.js';
 
 // Mints master + the core-5. Optional 3 (voice / visual / negotiator) are
 // surfaced as opt-in checkboxes elsewhere in onboarding and minted only on
@@ -126,7 +127,7 @@ export function useMintRoster({ twinName, walletAddress, signer, corpusUri }) {
               mints[r.id] = { tokenId: r.tokenId, txHash: r.txHash, explorerUrl: r.explorerUrl ?? null };
             }
           }
-          window.localStorage.setItem('2in:mints', JSON.stringify(mints));
+          setScoped('mints', JSON.stringify(mints));
           return rs;
         });
       } catch { /* ignore */ }

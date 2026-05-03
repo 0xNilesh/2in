@@ -9,8 +9,7 @@
 // iCloneFrom.
 
 import { readTwin } from '../hooks/useTwin.js';
-
-const MINTS_KEY = '2in:mints';
+import { getScoped, removeScoped } from '../lib/scoped-storage.js';
 
 // Map persisted mint results { master, writer, researcher, ... } to the
 // real tokenIds + tx hashes recorded by useMintRoster after onboarding's
@@ -18,7 +17,7 @@ const MINTS_KEY = '2in:mints';
 // persisted (e.g. fresh browser, or the mock-mode mint flow).
 function readMints() {
   if (typeof window === 'undefined') return {};
-  try { return JSON.parse(window.localStorage.getItem(MINTS_KEY) ?? '{}'); }
+  try { return JSON.parse(getScoped('mints') ?? '{}'); }
   catch { return {}; }
 }
 
@@ -226,7 +225,7 @@ export function getRoster() {
 /** Re-exported so other places (Settings reset, debug tools) can clear
  *  the persisted mint map. */
 export function clearMints() {
-  try { window.localStorage.removeItem(MINTS_KEY); } catch {}
+  removeScoped('mints');
 }
 
 /** True once useMintRoster has persisted a master mint with a tokenId.

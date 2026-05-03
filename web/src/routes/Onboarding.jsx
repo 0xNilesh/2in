@@ -17,6 +17,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ROUTES } from '../lib/routes.js';
+import { getScoped, setScoped } from '../lib/scoped-storage.js';
 import { useTwin } from '../hooks/useTwin.js';
 import { useAuth } from '../hooks/useAuth.js';
 import { useOnboardingState } from '../hooks/useOnboardingState.js';
@@ -51,7 +52,7 @@ export default function Onboarding() {
     // instead of the static demo #42.
     let masterTokenId;
     try {
-      const mints = JSON.parse(window.localStorage.getItem('2in:mints') ?? '{}');
+      const mints = JSON.parse(getScoped('mints') ?? '{}');
       masterTokenId = mints?.master?.tokenId;
     } catch { /* ignore */ }
     setTwin({
@@ -350,10 +351,7 @@ function XConnectBody({ update }) {
     });
 
     try {
-      window.localStorage.setItem(
-        '2in:corpus:twitter',
-        JSON.stringify({ handle, tweets, source }),
-      );
+      setScoped('corpus:twitter', JSON.stringify({ handle, tweets, source }));
     } catch {}
 
     // Upload corpus + extract persona in parallel — both call the server.

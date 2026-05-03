@@ -20,24 +20,12 @@ import { apiUrl } from '../lib/api.js';
 import { pushToast } from '../hooks/useToasts.js';
 import { getTwinId } from '../data/specialists.js';
 
-// Wipe everything that ties this browser to a particular twin: localStorage
-// keys (twin, threads, thread-ext, onboarding, memory cache, task caches,
-// rail, banner dismissals, corpus). Server memory persists on disk —
-// optionally clear it too via /api/memory/wipe.
+// Wipe everything that ties this browser to a particular twin: every
+// localStorage key under the `2in:` prefix (which now includes both the
+// global UI prefs and the per-wallet `2in:<address>:KEY` namespace).
+// Server memory wiped via /api/memory/<type>/<id> below.
 async function wipeLocalAndServer({ alsoServer = true }) {
-  const KEYS = [
-    '2in:twin',
-    '2in:threads',
-    '2in:thread-ext',
-    '2in:onboarding',
-    '2in:rail:collapsed',
-    '2in:memory',
-    '2in:corpus:twitter',
-    '2in:banner:dismissed:quill',
-    '2in:mints',
-  ];
   try {
-    for (const k of KEYS) window.localStorage.removeItem(k);
     for (let i = window.localStorage.length - 1; i >= 0; i--) {
       const k = window.localStorage.key(i);
       if (k && k.startsWith('2in:')) window.localStorage.removeItem(k);

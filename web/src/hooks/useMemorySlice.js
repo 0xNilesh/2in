@@ -7,15 +7,14 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { memoryApi } from '../lib/api.js';
-
-const FALLBACK_KEY = '2in:memory';
+import { getScoped, setScoped } from '../lib/scoped-storage.js';
 
 function readFallback() {
-  try { return JSON.parse(window.localStorage.getItem(FALLBACK_KEY) ?? '{}'); }
+  try { return JSON.parse(getScoped('memory') ?? '{}'); }
   catch { return {}; }
 }
 function writeFallback(all) {
-  try { window.localStorage.setItem(FALLBACK_KEY, JSON.stringify(all)); } catch {}
+  setScoped('memory', JSON.stringify(all));
 }
 
 export function useMemorySlice(sliceId, { twin = '42' } = {}) {

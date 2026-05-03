@@ -6,13 +6,12 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { defaultTwin } from '../data/twin.js';
-
-const KEY = '2in:twin';
+import { getScoped, setScoped } from '../lib/scoped-storage.js';
 
 function read() {
   if (typeof window === 'undefined') return defaultTwin;
   try {
-    const raw = window.localStorage.getItem(KEY);
+    const raw = getScoped('twin');
     if (!raw) return defaultTwin;
     return { ...defaultTwin, ...JSON.parse(raw) };
   } catch {
@@ -21,7 +20,7 @@ function read() {
 }
 
 function write(twin) {
-  window.localStorage.setItem(KEY, JSON.stringify(twin));
+  setScoped('twin', JSON.stringify(twin));
   window.dispatchEvent(new CustomEvent('twin:change'));
 }
 

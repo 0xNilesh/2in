@@ -2,20 +2,19 @@
 // Each slice has its own namespace under the same root key.
 
 import { useEffect, useState, useCallback } from 'react';
-
-const KEY = '2in:memory';
+import { getScoped, setScoped } from '../lib/scoped-storage.js';
 
 function readAll() {
   if (typeof window === 'undefined') return {};
   try {
-    return JSON.parse(window.localStorage.getItem(KEY) ?? '{}');
+    return JSON.parse(getScoped('memory') ?? '{}');
   } catch {
     return {};
   }
 }
 
 function writeAll(all) {
-  window.localStorage.setItem(KEY, JSON.stringify(all));
+  setScoped('memory', JSON.stringify(all));
   window.dispatchEvent(new CustomEvent('memory:change'));
 }
 

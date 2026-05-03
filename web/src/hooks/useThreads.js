@@ -16,11 +16,15 @@
 import { useEffect, useState, useCallback } from 'react';
 import { getTwinId } from '../data/specialists.js';
 import { apiUrl } from '../lib/api.js';
+import { scopedKey } from '../lib/scoped-storage.js';
 
-const KEY = '2in:threads';
-const EXT_KEY = '2in:thread-ext';
-const RESTORE_FLAG_KEY = '2in:threads:restored';
 const subscribers = new Set();
+const k = {
+  list:    () => scopedKey('threads'),
+  ext:     () => scopedKey('thread-ext'),
+  restore: () => scopedKey('threads:restored'),
+  task:    (id) => scopedKey(`task:${id}`),
+};
 let memoCache = null;
 let restorePromise = null;
 
@@ -31,7 +35,7 @@ const DEFAULT_SEED = () => [
 function loadAll() {
   if (memoCache) return memoCache;
   try {
-    const raw = window.localStorage.getItem(KEY);
+    const raw = window.localStorage.getItem(k.list());
     if (!raw) {
       // Don't seed yet — caller (useThreads effect) will try restoreFromCloud
       // first, then seed if that came back empty.
@@ -54,7 +58,7 @@ async function restoreFromCloud() {
   if (restorePromise) return restorePromise;
   // Avoid re-running every page nav once we've decided to seed locally.
   try {
-    if (window.localStorage.getItem(RESTORE_FLAG_KEY) === '1') return null;
+    if (window.localStorage.getItem(k.restore()) === '1') return null;
   } catch { /* ignore */ }
   restorePromise = (async () => {
     try {
@@ -85,7 +89,7 @@ async function restoreFromCloud() {
           // output / tool calls just like before the wipe.
           if (payload.tasks && typeof payload.tasks === 'object') {
             for (const [taskId, state] of Object.entries(payload.tasks)) {
-              tasksToSeed[`2in:task:${taskId}`] = JSON.stringify(state);
+              tasksToSeed[k.task(taskId)] = JSON.stringify(state);
             }
           }
         } catch { /* skip this pointer */ }
@@ -93,13 +97,13 @@ async function restoreFromCloud() {
       if (restored.length === 0) return null;
       // Persist what we got, and short-circuit future restores.
       try {
-        window.localStorage.setItem(KEY, JSON.stringify(restored));
-        const existingExt = JSON.parse(window.localStorage.getItem(EXT_KEY) ?? '{}');
-        window.localStorage.setItem(EXT_KEY, JSON.stringify({ ...existingExt, ...ext }));
+        window.localStorage.setItem(k.list(), JSON.stringify(restored));
+        const existingExt = JSON.parse(window.localStorage.getItem(k.ext()) ?? '{}');
+        window.localStorage.setItem(k.ext(), JSON.stringify({ ...existingExt, ...ext }));
         for (const [k, v] of Object.entries(tasksToSeed)) {
           window.localStorage.setItem(k, v);
         }
-        window.localStorage.setItem(RESTORE_FLAG_KEY, '1');
+        window.localStorage.setItem(k.restore(), '1');
       } catch { /* full / blocked */ }
       memoCache = restored;
       // eslint-disable-next-line no-console
@@ -116,7 +120,7 @@ async function restoreFromCloud() {
 
 function saveAll(threads) {
   memoCache = threads;
-  try { window.localStorage.setItem(KEY, JSON.stringify(threads)); } catch { /* full */ }
+  try { window.localStorage.setItem(k.list(), JSON.stringify(threads)); } catch { /* full */ }
   for (const cb of subscribers) cb(threads);
 }
 
@@ -154,7 +158,7 @@ export function useThreads() {
         saveAll(restored);
       } else {
         const seed = DEFAULT_SEED();
-        try { window.localStorage.setItem(RESTORE_FLAG_KEY, '1'); } catch { /* ignore */ }
+        try { window.localStorage.setItem(k.restore(), '1'); } catch { /* ignore */ }
         saveAll(seed);
       }
     })();
@@ -183,7 +187,7 @@ export function useThreads() {
     saveAll(filtered);
     // Also drop the per-thread message extension to avoid a stale ghost.
     try {
-      const extKey = '2in:thread-ext';
+      const extKey = k.ext();
       const all = JSON.parse(window.localStorage.getItem(extKey) ?? '{}');
       delete all[id];
       window.localStorage.setItem(extKey, JSON.stringify(all));

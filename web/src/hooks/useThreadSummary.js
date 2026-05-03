@@ -15,8 +15,8 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { chatApi } from '../lib/api.js';
+import { scopedKey } from '../lib/scoped-storage.js';
 
-const STORAGE_PREFIX = '2in:thread-summary:';
 // How many recent turns the server keeps verbatim (matches HISTORY_TURN_CAP).
 const TURN_CAP_VERBATIM = 10;
 // Below this total, no summary needed — the verbatim cap covers everything.
@@ -24,20 +24,24 @@ const SUMMARY_MIN_TOTAL = 12;
 // Re-summarize when N new messages accumulate since the last summary.
 const REFRESH_AFTER_NEW = 4;
 
+function summaryKey(threadId) {
+  return scopedKey(`thread-summary:${threadId}`);
+}
+
 function load(threadId) {
   try {
-    const raw = window.localStorage.getItem(STORAGE_PREFIX + threadId);
+    const raw = window.localStorage.getItem(summaryKey(threadId));
     return raw ? JSON.parse(raw) : null;
   } catch { return null; }
 }
 
 function save(threadId, value) {
-  try { window.localStorage.setItem(STORAGE_PREFIX + threadId, JSON.stringify(value)); }
+  try { window.localStorage.setItem(summaryKey(threadId), JSON.stringify(value)); }
   catch { /* full / blocked */ }
 }
 
 export function clearThreadSummary(threadId) {
-  try { window.localStorage.removeItem(STORAGE_PREFIX + threadId); } catch {}
+  try { window.localStorage.removeItem(summaryKey(threadId)); } catch {}
 }
 
 /** messages: full thread message list in chat-format ({ role, content }).

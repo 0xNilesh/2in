@@ -2,8 +2,7 @@
 // We use sessionStorage so it's tab-scoped and clears on close.
 
 import { useEffect, useState, useCallback } from 'react';
-
-const KEY = '2in:onboarding';
+import { scopedKey } from '../lib/scoped-storage.js';
 
 const empty = {
   step: 0,
@@ -15,7 +14,7 @@ const empty = {
 function read() {
   if (typeof window === 'undefined') return empty;
   try {
-    const raw = window.sessionStorage.getItem(KEY);
+    const raw = window.sessionStorage.getItem(scopedKey('onboarding'));
     return raw ? { ...empty, ...JSON.parse(raw) } : empty;
   } catch {
     return empty;
@@ -23,7 +22,7 @@ function read() {
 }
 
 function write(state) {
-  window.sessionStorage.setItem(KEY, JSON.stringify(state));
+  try { window.sessionStorage.setItem(scopedKey('onboarding'), JSON.stringify(state)); } catch { /* ignore */ }
 }
 
 export function useOnboardingState() {
@@ -36,7 +35,7 @@ export function useOnboardingState() {
   }, []);
 
   const reset = useCallback(() => {
-    window.sessionStorage.removeItem(KEY);
+    try { window.sessionStorage.removeItem(scopedKey('onboarding')); } catch { /* ignore */ }
     setState(empty);
   }, []);
 

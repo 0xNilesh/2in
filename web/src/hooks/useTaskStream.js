@@ -11,6 +11,7 @@
 
 import { useEffect, useState } from 'react';
 import { sseGet } from '../lib/sse.js';
+import { scopedKey } from '../lib/scoped-storage.js';
 
 const empty = {
   meta: null,
@@ -23,11 +24,13 @@ const empty = {
   serverDropped: false,
 };
 
-const STORAGE_PREFIX = '2in:task:';
+function taskKey(taskId) {
+  return scopedKey(`task:${taskId}`);
+}
 
 function loadCached(taskId) {
   try {
-    const raw = window.localStorage.getItem(STORAGE_PREFIX + taskId);
+    const raw = window.localStorage.getItem(taskKey(taskId));
     if (!raw) return null;
     return JSON.parse(raw);
   } catch { return null; }
@@ -37,7 +40,7 @@ function saveCache(taskId, state) {
   try {
     // Don't persist the serverDropped flag — it's UI-only.
     const { serverDropped: _, ...rest } = state;
-    window.localStorage.setItem(STORAGE_PREFIX + taskId, JSON.stringify(rest));
+    window.localStorage.setItem(taskKey(taskId), JSON.stringify(rest));
   } catch { /* localStorage full / blocked — silent */ }
 }
 

@@ -20,18 +20,17 @@ import { useThreadSummary } from '../hooks/useThreadSummary.js';
 import { ROUTES } from '../lib/routes.js';
 import { taskApi, memoryApi, chatApi, toolsApi, uploadApi, apiUrl, absolutize } from '../lib/api.js';
 import { pushToast } from '../hooks/useToasts.js';
-
-const EXT_KEY = '2in:thread-ext';
+import { scopedKey, getScoped } from '../lib/scoped-storage.js';
 
 function readExt() {
   try {
-    return JSON.parse(window.localStorage.getItem(EXT_KEY) ?? '{}');
+    return JSON.parse(window.localStorage.getItem(scopedKey('thread-ext')) ?? '{}');
   } catch {
     return {};
   }
 }
 function writeExt(all) {
-  try { window.localStorage.setItem(EXT_KEY, JSON.stringify(all)); } catch {}
+  try { window.localStorage.setItem(scopedKey('thread-ext'), JSON.stringify(all)); } catch {}
 }
 
 export default function Chat() {
@@ -78,7 +77,7 @@ export default function Chat() {
 }
 
 function readCorpus() {
-  try { return JSON.parse(window.localStorage.getItem('2in:corpus:twitter') ?? 'null'); }
+  try { return JSON.parse(getScoped('corpus:twitter') ?? 'null'); }
   catch { return null; }
 }
 
@@ -193,7 +192,7 @@ function ChatBody({ threadId, twin, seed, thread, onRename, onTouch, onNewChat, 
       const taskId = m?.body?.taskRef;
       if (!taskId) continue;
       try {
-        const raw = window.localStorage.getItem(`2in:task:${taskId}`);
+        const raw = window.localStorage.getItem(scopedKey(`task:${taskId}`));
         if (raw) tasks[taskId] = JSON.parse(raw);
       } catch { /* skip unparseable */ }
     }
@@ -237,7 +236,7 @@ function ChatBody({ threadId, twin, seed, thread, onRename, onTouch, onNewChat, 
             const taskId = m?.body?.taskRef;
             if (!taskId) continue;
             try {
-              const raw = window.localStorage.getItem(`2in:task:${taskId}`);
+              const raw = window.localStorage.getItem(scopedKey(`task:${taskId}`));
               if (raw) tasks[taskId] = JSON.parse(raw);
             } catch { /* skip */ }
           }

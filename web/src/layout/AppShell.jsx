@@ -7,6 +7,7 @@
 // A global toast stack lives at the bottom-right and bridges every async
 // surface (memory writes, snapshots, tx echoes, tool failures).
 
+import { useEffect } from 'react';
 import { Outlet, useSearchParams, Navigate } from 'react-router-dom';
 import { Rail } from './Rail.jsx';
 import { WorkPane } from '../components/WorkPane.jsx';
@@ -16,6 +17,7 @@ import { useSnapshotToasts } from '../hooks/useSnapshotToasts.js';
 import { useMemoryToasts } from '../hooks/useMemoryStream.js';
 import { useAuth } from '../hooks/useAuth.js';
 import { hasMintedTwin } from '../data/specialists.js';
+import { getActiveAddress, setActiveAddress } from '../lib/scoped-storage.js';
 
 export function AppShell() {
   const [params] = useSearchParams();
@@ -27,6 +29,31 @@ export function AppShell() {
   // of which page the user is on.
   useSnapshotToasts();
   useMemoryToasts();
+
+  // Wallet-isolation. Every wallet-scoped localStorage key (mints,
+  // threads, thread-ext, onboarding, memory cache, task caches, persona
+  // seed, …) is suffixed with the current address via scoped-storage.js.
+  // Switching from wallet A → B → A round-trips state cleanly:
+  //   - wallet A keeps its twin / threads / mints under `2in:0xa…:KEY`
+  //   - wallet B keeps its own under `2in:0xb…:KEY`
+  //   - log back into wallet A and the cache is intact
+  //
+  // This effect just keeps `2in:active-address` in sync with Privy.
+  // When the pointer changes mid-session, we hard-reload so every hook
+  // (useThreads, useTwin, useMintRoster, …) re-reads from the new scope.
+  useEffect(() => {
+    if (!auth.ready || !auth.authenticated || !auth.address) return;
+    const last = getActiveAddress();
+    const current = auth.address.toLowerCase();
+    if (last && last !== current) {
+      // eslint-disable-next-line no-console
+      console.info(`[auth] wallet switched ${last} → ${current} — re-scoping localStorage to new address`);
+      setActiveAddress(current);
+      window.location.reload();
+      return;
+    }
+    if (!last) setActiveAddress(current);
+  }, [auth.ready, auth.authenticated, auth.address]);
 
   // Onboarding gate. Two conditions reroute the user out of the shell:
   //   1. Privy not authenticated → back to landing.
