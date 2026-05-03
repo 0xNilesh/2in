@@ -19,6 +19,14 @@ import { compute, type ChatMessage } from '../services/compute.js';
 import { systemPrompt, type AgentRole } from '../services/prompts.js';
 import { sseStream, setSseHeaders, type SseStream } from '../lib/sse.js';
 import { retrieve as memoryRetrieve, MEMORY_TYPES, type MemoryEntry } from '../services/memory.js';
+import { storage } from '../services/storage.js';
+
+const SnapshotBody = z.object({
+  twin: z.string().optional(),
+  threadId: z.string().min(1),
+  thread: z.record(z.unknown()),
+  msgCount: z.number().int().nonnegative().optional(),
+});
 
 const TwinCtx = z.object({
   name: z.string().optional(),
@@ -101,6 +109,53 @@ export async function chatRoutes(app: FastifyInstance): Promise<void> {
       summary = '';
     }
     return { summary };
+  });
+
+  // POST /api/chat/snapshot
+  // Body: { twin?: string, threadId: string, thread: object }
+  // Uploads the thread payload to 0G Indexer, then writes the rootHash
+  // pointer into 0G KV at twin:{id}:thread:{threadId}.
+  app.post('/chat/snapshot', async (req) => {
+    const body = SnapshotBody.parse(req.body);
+    const twinId = body.twin ?? '42';
+    const json = Buffer.from(JSON.stringify({
+      ...body.thread,
+      _snapshot_ts: Date.now(),
+    }));
+    const upload = await storage.uploadBlob(json, { contentType: 'application/json' });
+    // Persist only rootHash + ts + msgCount. The gatewayUrl is derived on
+    // read from the current config so changing STORAGE_GATEWAY propagates
+    // instantly without rewriting old pointers.
+    const stored = {
+      rootHash: upload.rootHash,
+      ts: Date.now(),
+      msgCount: body.msgCount ?? null,
+    };
+    await storage.writeKv(`twin:${twinId}:thread`, body.threadId, JSON.stringify(stored));
+    // eslint-disable-next-line no-console
+    req.log.info({ rootHash: upload.rootHash, threadId: body.threadId }, '[chat] thread snapshot uploaded');
+    return { ...stored, gatewayUrl: storage.gatewayUrl(upload.rootHash) };
+  });
+
+  // GET /api/chat/threads?twin=42
+  // Returns all thread pointers stored in KV — used by the client when
+  // localStorage is empty (fresh browser, after Reset, cross-device) to
+  // restore the thread list from 0G Storage.
+  app.get('/chat/threads', async (req) => {
+    const q = req.query as { twin?: string };
+    const twinId = q.twin ?? '42';
+    const entries = await storage.listKv(`twin:${twinId}:thread`);
+    const threads = entries
+      .map((e) => {
+        try {
+          const p = JSON.parse(e.value) as { rootHash: string; ts: number; msgCount: number | null };
+          // gatewayUrl is derived from current config so any STORAGE_GATEWAY
+          // change applies retroactively to older pointers.
+          return { threadId: e.key, ...p, gatewayUrl: storage.gatewayUrl(p.rootHash) };
+        } catch { return null; }
+      })
+      .filter((x): x is { threadId: string; rootHash: string; gatewayUrl: string; ts: number; msgCount: number | null } => x !== null);
+    return { count: threads.length, threads };
   });
 }
 

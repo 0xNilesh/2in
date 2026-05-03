@@ -11,5 +11,5 @@ export function explorerUrl(tokenId) {
 
 export function gatewayUrl(rootHash) {
   if (!rootHash) return null;
-  return `https://indexer-storage-turbo.0g.ai/file?root=${rootHash}`;
+  return `https://indexer-storage-testnet-turbo.0g.ai/file?root=${rootHash}`;
 }
