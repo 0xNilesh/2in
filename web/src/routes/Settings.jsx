@@ -23,7 +23,7 @@ import { useAuth } from '../hooks/useAuth.js';
 import { useViemWalletClient } from '../lib/privy-signer.js';
 import { isChainConfigured, chainConfig, getExplorerTxUrl } from '../lib/chain.js';
 import { TWIN_INFT_ABI } from '../lib/abi/twin-nft.js';
-import { chainApi } from '../lib/api.js';
+import { chainApi, apiUrl } from '../lib/api.js';
 import { pushToast } from '../hooks/useToasts.js';
 import { getTwinId } from '../data/specialists.js';
 
@@ -110,10 +110,10 @@ async function wipeLocalAndServer({ alsoServer = true }) {
       const twinId = encodeURIComponent(getTwinId());
       const types = ['episodic', 'semantic', 'relationship', 'temporal', 'procedural', 'working'];
       for (const t of types) {
-        const list = await fetch(`/api/memory/${t}/list?twin=${twinId}`).then((r) => r.ok ? r.json() : { entries: [] });
+        const list = await fetch(apiUrl(`/api/memory/${t}/list?twin=${twinId}`)).then((r) => r.ok ? r.json() : { entries: [] });
         for (const e of list.entries ?? []) {
           if (e.id) {
-            await fetch(`/api/memory/${t}/${encodeURIComponent(e.id)}?twin=${twinId}`, { method: 'DELETE' }).catch(() => {});
+            await fetch(apiUrl(`/api/memory/${t}/${encodeURIComponent(e.id)}?twin=${twinId}`), { method: 'DELETE' }).catch(() => {});
           }
         }
       }
@@ -129,7 +129,7 @@ function ConversationLogCard() {
 
   useEffect(() => {
     let cancelled = false;
-    const load = () => fetch(`/api/chat/threads?twin=${encodeURIComponent(getTwinId())}`)
+    const load = () => fetch(apiUrl(`/api/chat/threads?twin=${encodeURIComponent(getTwinId())}`))
       .then((r) => (r.ok ? r.json() : { threads: [] }))
       .then((j) => {
         if (cancelled) return;

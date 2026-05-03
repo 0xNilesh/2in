@@ -6,8 +6,15 @@
 //
 // Both return an object: { onEvent, close }. Cancel by calling close().
 // onEvent(name, handler) — register a callback per event name.
+//
+// Both helpers prepend VITE_API_BASE for relative /api/* paths so callers
+// don't have to wrap every URL by hand. Same constant the rest of the app
+// uses via lib/api.js.
 
-export function ssePost(url, body, init = {}) {
+import { apiUrl } from './api.js';
+
+export function ssePost(rawUrl, body, init = {}) {
+  const url = rawUrl.startsWith('/') ? apiUrl(rawUrl) : rawUrl;
   const ctrl = new AbortController();
   const handlers = new Map();
   let closed = false;
@@ -50,7 +57,8 @@ export function ssePost(url, body, init = {}) {
   };
 }
 
-export function sseGet(url) {
+export function sseGet(rawUrl) {
+  const url = rawUrl.startsWith('/') ? apiUrl(rawUrl) : rawUrl;
   const handlers = new Map();
   const ctrl = new AbortController();
   let closed = false;

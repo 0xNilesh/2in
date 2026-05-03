@@ -15,6 +15,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { getTwinId } from '../data/specialists.js';
+import { apiUrl } from '../lib/api.js';
 
 const KEY = '2in:threads';
 const EXT_KEY = '2in:thread-ext';
@@ -57,7 +58,7 @@ async function restoreFromCloud() {
   } catch { /* ignore */ }
   restorePromise = (async () => {
     try {
-      const res = await fetch(`/api/chat/threads?twin=${encodeURIComponent(getTwinId())}`);
+      const res = await fetch(apiUrl(`/api/chat/threads?twin=${encodeURIComponent(getTwinId())}`));
       if (!res.ok) return null;
       const data = await res.json();
       const ptrs = Array.isArray(data?.threads) ? data.threads : [];

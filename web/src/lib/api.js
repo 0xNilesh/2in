@@ -2,6 +2,15 @@
 
 const BASE = (import.meta.env.VITE_API_BASE ?? '').replace(/\/$/, '');
 
+/** Prepend VITE_API_BASE to an /api/… path. Use this anywhere outside
+ *  this file that calls the backend directly (raw `fetch`, sse helpers,
+ *  EventSource constructors). In dev BASE is empty so the result is a
+ *  relative URL → Vite proxies to localhost:3001. In prod BASE is the
+ *  Render URL so the call goes cross-origin to the deployed server. */
+export function apiUrl(path) {
+  return `${BASE}${path}`;
+}
+
 function url(path) {
   return `${BASE}${path}`;
 }

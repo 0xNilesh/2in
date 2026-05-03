@@ -18,7 +18,7 @@ import { useThreads, getThreadSync, deriveTitle } from '../hooks/useThreads.js';
 import { getTwinId } from '../data/specialists.js';
 import { useThreadSummary } from '../hooks/useThreadSummary.js';
 import { ROUTES } from '../lib/routes.js';
-import { taskApi, memoryApi, chatApi, toolsApi } from '../lib/api.js';
+import { taskApi, memoryApi, chatApi, toolsApi, apiUrl } from '../lib/api.js';
 import { pushToast } from '../hooks/useToasts.js';
 
 const EXT_KEY = '2in:thread-ext';
@@ -143,7 +143,7 @@ function ChatBody({ threadId, twin, seed, thread, onRename, onTouch, onNewChat, 
       messages: msgs,
       tasks,
     };
-    return fetch('/api/chat/snapshot', {
+    return fetch(apiUrl('/api/chat/snapshot'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -179,7 +179,7 @@ function ChatBody({ threadId, twin, seed, thread, onRename, onTouch, onNewChat, 
               if (raw) tasks[taskId] = JSON.parse(raw);
             } catch { /* skip */ }
           }
-          fetch('/api/chat/snapshot', {
+          fetch(apiUrl('/api/chat/snapshot'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             keepalive: true,

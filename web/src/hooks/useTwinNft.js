@@ -2,6 +2,7 @@
 // Returns { state, loading, error, refetch }.
 
 import { useCallback, useEffect, useState } from 'react';
+import { apiUrl } from '../lib/api.js';
 
 export function useTwinNft(tokenId) {
   const [state, setState] = useState(null);
@@ -13,7 +14,7 @@ export function useTwinNft(tokenId) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/chain/twin/${tokenId}`);
+      const res = await fetch(apiUrl(`/api/chain/twin/${tokenId}`));
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.message ?? `HTTP ${res.status}`);
