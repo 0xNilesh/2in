@@ -15,7 +15,7 @@
 //   - Multichain switch (only Galileo is supported)
 //   - 8 social / document source connectors
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader.jsx';
 import { StatusPill } from '../components/StatusPill.jsx';
@@ -25,6 +25,7 @@ import { isChainConfigured, chainConfig, getExplorerTxUrl } from '../lib/chain.j
 import { TWIN_INFT_ABI } from '../lib/abi/twin-nft.js';
 import { chainApi } from '../lib/api.js';
 import { pushToast } from '../hooks/useToasts.js';
+import { getTwinId } from '../data/specialists.js';
 
 const ORCHESTRATOR_DELEGATE = '0x91ab2f7d000000000000000000000000000002f7d1'; // demo hot wallet placeholder
 
@@ -106,17 +107,94 @@ async function wipeLocalAndServer({ alsoServer = true }) {
 
   if (alsoServer) {
     try {
+      const twinId = encodeURIComponent(getTwinId());
       const types = ['episodic', 'semantic', 'relationship', 'temporal', 'procedural', 'working'];
       for (const t of types) {
-        const list = await fetch(`/api/memory/${t}/list?twin=42`).then((r) => r.ok ? r.json() : { entries: [] });
+        const list = await fetch(`/api/memory/${t}/list?twin=${twinId}`).then((r) => r.ok ? r.json() : { entries: [] });
         for (const e of list.entries ?? []) {
           if (e.id) {
-            await fetch(`/api/memory/${t}/${encodeURIComponent(e.id)}?twin=42`, { method: 'DELETE' }).catch(() => {});
+            await fetch(`/api/memory/${t}/${encodeURIComponent(e.id)}?twin=${twinId}`, { method: 'DELETE' }).catch(() => {});
           }
         }
       }
     } catch { /* server may be down — local wipe still useful */ }
   }
+}
+
+// Conversation log card — fetches /api/chat/threads and lists every thread
+// snapshot stored on 0G Storage with its rootHash + gateway link + msg count.
+// Live refresh every 8s so new chats appear without manual reload.
+function ConversationLogCard() {
+  const [state, setState] = useState({ loading: true, threads: [] });
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => fetch(`/api/chat/threads?twin=${encodeURIComponent(getTwinId())}`)
+      .then((r) => (r.ok ? r.json() : { threads: [] }))
+      .then((j) => {
+        if (cancelled) return;
+        const threads = (Array.isArray(j?.threads) ? j.threads : [])
+          .slice()
+          .sort((a, b) => (b.ts ?? 0) - (a.ts ?? 0));
+        setState({ loading: false, threads });
+      })
+      .catch(() => { if (!cancelled) setState({ loading: false, threads: [] }); });
+    load();
+    const id = setInterval(load, 8_000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
+  return (
+    <div className="card" style={{ padding: 0 }}>
+      <div className="settings-row" style={{ alignItems: 'flex-start' }}>
+        <div className="k">
+          Thread snapshots
+          <span className="s">Per-thread JSON uploaded to 0G Indexer · pointer in 0G KV · refresh 8s</span>
+        </div>
+        <div className="v" style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {state.loading ? (
+            <span style={{ color: 'var(--text-mute)' }}>loading…</span>
+          ) : state.threads.length === 0 ? (
+            <span style={{ color: 'var(--text-mute)' }}>no snapshots yet</span>
+          ) : (
+            <>
+              <span style={{ color: 'var(--text-mute)' }}>{state.threads.length} thread{state.threads.length === 1 ? '' : 's'}</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {state.threads.map((t) => (
+                  <div key={t.threadId} style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'baseline',
+                    gap: 12,
+                    fontFamily: 'Geist Mono, monospace',
+                    fontSize: 10.5,
+                    paddingTop: 4,
+                    borderTop: '1px dashed var(--border)',
+                  }}>
+                    <span style={{ color: 'var(--text-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {t.threadId}
+                    </span>
+                    <span style={{ color: 'var(--text-faint)', flexShrink: 0 }}>
+                      {t.msgCount != null ? `${t.msgCount} msg${t.msgCount === 1 ? '' : 's'}` : '— msgs'}
+                    </span>
+                    <a
+                      href={t.gatewayUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: 'var(--peach)', flexShrink: 0 }}
+                    >
+                      {t.rootHash.slice(0, 10)}…{t.rootHash.slice(-6)} ↗
+                    </a>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+        <span style={{ fontSize: 10.5, color: 'var(--mint)', fontFamily: 'Geist Mono, monospace', flexShrink: 0 }}>0G STORAGE</span>
+      </div>
+    </div>
+  );
 }
 
 // === presentational ==================================================
@@ -319,6 +397,9 @@ export default function Settings() {
               >{resetting ? 'wiping…' : 'Reset everything'}</button>
             </div>
           </div>
+
+          <div className="label-mono" style={{ margin: '24px 0 10px' }}>Conversation log · 0G Storage</div>
+          <ConversationLogCard />
 
           <div className="label-mono" style={{ margin: '24px 0 10px' }}>Connected sources</div>
           <div className="card" style={{ padding: 0 }}>

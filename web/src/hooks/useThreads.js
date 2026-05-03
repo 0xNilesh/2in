@@ -5,34 +5,112 @@
 //
 // Each thread: { id, title, createdAt, updatedAt }
 //
-// Default behaviour: on first ever load (no key in localStorage) we seed
-// with one thread {id: 't-default', title: 'New chat'} so the UI isn't
-// empty. After that the user owns the list — no auto-seeding.
+// First-load behaviour:
+//   1. If '2in:threads' is set in localStorage, use it.
+//   2. If empty (fresh browser, after Reset, cross-device), kick off a
+//      one-shot restore from /api/chat/threads → 0G Indexer. If the server
+//      has thread snapshots stored in 0G KV, hydrate them into both
+//      '2in:threads' (metadata) and '2in:thread-ext' (per-thread messages).
+//   3. Only if both are empty do we seed the default 'New chat' thread.
 
 import { useEffect, useState, useCallback } from 'react';
+import { getTwinId } from '../data/specialists.js';
 
 const KEY = '2in:threads';
+const EXT_KEY = '2in:thread-ext';
+const RESTORE_FLAG_KEY = '2in:threads:restored';
 const subscribers = new Set();
 let memoCache = null;
+let restorePromise = null;
+
+const DEFAULT_SEED = () => [
+  { id: 't-default', title: 'New chat', createdAt: Date.now(), updatedAt: Date.now() },
+];
 
 function loadAll() {
   if (memoCache) return memoCache;
   try {
     const raw = window.localStorage.getItem(KEY);
     if (!raw) {
-      memoCache = [{ id: 't-default', title: 'New chat', createdAt: Date.now(), updatedAt: Date.now() }];
-      window.localStorage.setItem(KEY, JSON.stringify(memoCache));
+      // Don't seed yet — caller (useThreads effect) will try restoreFromCloud
+      // first, then seed if that came back empty.
+      memoCache = [];
       return memoCache;
     }
     memoCache = JSON.parse(raw);
-    if (!Array.isArray(memoCache) || memoCache.length === 0) {
-      memoCache = [{ id: 't-default', title: 'New chat', createdAt: Date.now(), updatedAt: Date.now() }];
-    }
+    if (!Array.isArray(memoCache)) memoCache = [];
     return memoCache;
   } catch {
-    memoCache = [{ id: 't-default', title: 'New chat', createdAt: Date.now(), updatedAt: Date.now() }];
+    memoCache = [];
     return memoCache;
   }
+}
+
+/** One-shot restore of thread metadata + per-thread messages from 0G
+ *  (via the server's /api/chat/threads endpoint). Idempotent — multiple
+ *  callers share the same in-flight promise. */
+async function restoreFromCloud() {
+  if (restorePromise) return restorePromise;
+  // Avoid re-running every page nav once we've decided to seed locally.
+  try {
+    if (window.localStorage.getItem(RESTORE_FLAG_KEY) === '1') return null;
+  } catch { /* ignore */ }
+  restorePromise = (async () => {
+    try {
+      const res = await fetch(`/api/chat/threads?twin=${encodeURIComponent(getTwinId())}`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      const ptrs = Array.isArray(data?.threads) ? data.threads : [];
+      if (ptrs.length === 0) return null;
+      const restored = [];
+      const ext = {};
+      const tasksToSeed = {}; // { '2in:task:<id>': stateJson }
+      for (const p of ptrs) {
+        try {
+          const blob = await fetch(p.gatewayUrl);
+          if (!blob.ok) continue;
+          const payload = await blob.json();
+          restored.push({
+            id: payload.id ?? p.threadId,
+            title: payload.title ?? 'Restored thread',
+            createdAt: payload.createdAt ?? p.ts ?? Date.now(),
+            updatedAt: p.ts ?? Date.now(),
+          });
+          if (Array.isArray(payload.messages)) {
+            ext[payload.id ?? p.threadId] = payload.messages;
+          }
+          // Tasks bundle: write each cached work-pane state back so the
+          // "Open work pane" path renders Writer drafts / Researcher
+          // output / tool calls just like before the wipe.
+          if (payload.tasks && typeof payload.tasks === 'object') {
+            for (const [taskId, state] of Object.entries(payload.tasks)) {
+              tasksToSeed[`2in:task:${taskId}`] = JSON.stringify(state);
+            }
+          }
+        } catch { /* skip this pointer */ }
+      }
+      if (restored.length === 0) return null;
+      // Persist what we got, and short-circuit future restores.
+      try {
+        window.localStorage.setItem(KEY, JSON.stringify(restored));
+        const existingExt = JSON.parse(window.localStorage.getItem(EXT_KEY) ?? '{}');
+        window.localStorage.setItem(EXT_KEY, JSON.stringify({ ...existingExt, ...ext }));
+        for (const [k, v] of Object.entries(tasksToSeed)) {
+          window.localStorage.setItem(k, v);
+        }
+        window.localStorage.setItem(RESTORE_FLAG_KEY, '1');
+      } catch { /* full / blocked */ }
+      memoCache = restored;
+      // eslint-disable-next-line no-console
+      console.info(`[threads] restored ${restored.length} thread(s) + ${Object.keys(tasksToSeed).length} task(s) from 0G Storage`);
+      return restored;
+    } catch {
+      return null;
+    } finally {
+      restorePromise = null;
+    }
+  })();
+  return restorePromise;
 }
 
 function saveAll(threads) {
@@ -62,6 +140,25 @@ export function useThreads() {
     subscribers.add(cb);
     return () => subscribers.delete(cb);
   }, []);
+
+  // First-mount restore + seed flow. If localStorage was empty, try the
+  // 0G Storage restore; if THAT comes back empty, fall back to the seed.
+  useEffect(() => {
+    if (threads.length > 0) return;
+    let cancelled = false;
+    (async () => {
+      const restored = await restoreFromCloud();
+      if (cancelled) return;
+      if (restored && restored.length > 0) {
+        saveAll(restored);
+      } else {
+        const seed = DEFAULT_SEED();
+        try { window.localStorage.setItem(RESTORE_FLAG_KEY, '1'); } catch { /* ignore */ }
+        saveAll(seed);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [threads.length]);
 
   const createThread = useCallback(() => {
     const t = { id: newId(), title: 'New chat', createdAt: Date.now(), updatedAt: Date.now() };

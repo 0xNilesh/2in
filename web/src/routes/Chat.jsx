@@ -15,6 +15,7 @@ import { Avatar } from '../components/Avatar.jsx';
 import { useTwin } from '../hooks/useTwin.js';
 import { useStreamingChat } from '../hooks/useStreamingChat.js';
 import { useThreads, getThreadSync, deriveTitle } from '../hooks/useThreads.js';
+import { getTwinId } from '../data/specialists.js';
 import { useThreadSummary } from '../hooks/useThreadSummary.js';
 import { ROUTES } from '../lib/routes.js';
 import { taskApi, memoryApi, chatApi, toolsApi } from '../lib/api.js';
@@ -105,6 +106,102 @@ function ChatBody({ threadId, twin, seed, thread, onRename, onTouch, onNewChat, 
     }
     writeExt(all);
   }, [extension, threadId]);
+
+  // Snapshot the thread to 0G Storage. Debounced — every change to the
+  // message list (user msg, director reply, taskRef append, work-pane
+  // updates) restarts a 1.5 s timer; the actual upload only fires once
+  // the conversation settles. This makes one settled snapshot per turn
+  // instead of multiple racing partial ones, and guarantees the final
+  // state captures the director's reply + the taskRef.
+  //
+  // Also flushes on unmount so navigating away from /chat doesn't lose
+  // an in-flight snapshot.
+  //
+  // Bundles every referenced task's localStorage state ('2in:task:<id>')
+  // alongside the messages so cross-device restore reconstructs the work
+  // pane (Writer drafts, Researcher output, costs, tool calls) too —
+  // not just the message stream.
+  const latestExtensionRef = useRef(extension);
+  useEffect(() => { latestExtensionRef.current = extension; }, [extension]);
+
+  const fireSnapshot = (msgs) => {
+    if (!msgs || msgs.length === 0) return;
+    const tasks = {};
+    for (const m of msgs) {
+      const taskId = m?.body?.taskRef;
+      if (!taskId) continue;
+      try {
+        const raw = window.localStorage.getItem(`2in:task:${taskId}`);
+        if (raw) tasks[taskId] = JSON.parse(raw);
+      } catch { /* skip unparseable */ }
+    }
+    const payload = {
+      id: threadId,
+      title: thread.title,
+      createdAt: thread.createdAt,
+      updatedAt: Date.now(),
+      messages: msgs,
+      tasks,
+    };
+    return fetch('/api/chat/snapshot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        twin: getTwinId(),
+        threadId,
+        thread: payload,
+        msgCount: msgs.length,
+      }),
+    }).catch(() => { /* swallow — snapshot is best-effort */ });
+  };
+
+  useEffect(() => {
+    if (extension.length === 0) return;
+    const t = setTimeout(() => fireSnapshot(latestExtensionRef.current), 1500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [extension, threadId]);
+
+  // On unmount (or thread change): if we have unsaved messages, flush
+  // immediately so user navigation doesn't leak a partial snapshot.
+  useEffect(() => {
+    return () => {
+      const latest = latestExtensionRef.current;
+      if (latest && latest.length > 0) {
+        // Fire-and-forget — keepalive lets the request survive page nav.
+        try {
+          const tasks = {};
+          for (const m of latest) {
+            const taskId = m?.body?.taskRef;
+            if (!taskId) continue;
+            try {
+              const raw = window.localStorage.getItem(`2in:task:${taskId}`);
+              if (raw) tasks[taskId] = JSON.parse(raw);
+            } catch { /* skip */ }
+          }
+          fetch('/api/chat/snapshot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            keepalive: true,
+            body: JSON.stringify({
+              twin: getTwinId(),
+              threadId,
+              thread: {
+                id: threadId,
+                title: thread.title,
+                createdAt: thread.createdAt,
+                updatedAt: Date.now(),
+                messages: latest,
+                tasks,
+              },
+              msgCount: latest.length,
+            }),
+          }).catch(() => {});
+        } catch { /* ignore */ }
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadId]);
 
   // Auto-scroll to the bottom on new content.
   useEffect(() => {

@@ -236,3 +236,14 @@ export function hasMintedTwin() {
   if (typeof window === 'undefined') return false;
   return Boolean(readMints().master?.tokenId);
 }
+
+/** Returns the master twin's tokenId as a string for use as the `twin`
+ *  query / body param on server APIs (memory, chat snapshot, threads).
+ *  Falls back to '42' (the static demo tokenId) when no real mint has
+ *  been persisted yet — keeps APIs usable during onboarding's first chat
+ *  and in dev mode. */
+export function getTwinId() {
+  if (typeof window === 'undefined') return '42';
+  const id = readMints().master?.tokenId;
+  return id != null ? String(id) : '42';
+}
