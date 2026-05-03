@@ -62,19 +62,31 @@ const Schema = z.object({
   BROKER_FINETUNE_CA: z.string().default('0xaC66eBd174435c04F1449BBa08157a707B6fa7b1'),
   BROKER_INITIAL_FUND_OG: z.coerce.number().default(0.1),
 
-  // 0G Storage. Same mock-fallback story: without STORAGE_PRIVATE_KEY,
-  // uploads return deterministic fake hashes and KV is in-memory.
-  STORAGE_PRIVATE_KEY: z.string().optional(),
+  // 0G Storage. STORAGE_PRIVATE_KEY is REQUIRED — the storage layer is
+  // 100% on 0G (KV streams + Indexer cache snapshots), there is no disk
+  // or external-DB fallback. Server refuses to boot without it so misconfig
+  // surfaces immediately instead of silently losing state.
+  STORAGE_PRIVATE_KEY: z.string().min(1, 'STORAGE_PRIVATE_KEY is required — no fallback backend'),
   STORAGE_RPC: z.string().default('https://evmrpc-testnet.0g.ai'),
   STORAGE_INDEXER: z.string().default('https://indexer-storage-testnet-turbo.0g.ai'),
-  STORAGE_GATEWAY: z.string().default('https://indexer-storage-turbo.0g.ai'),
-
-  // KV persistence. Without MONGO_URI, KV writes mirror to /tmp on disk
-  // (fine for local dev, breaks on Render free tier where /tmp resets on
-  // every cold start). Set MONGO_URI to a MongoDB Atlas M0 connection
-  // string to persist memory + persona + threads across restarts.
-  MONGO_URI: z.string().optional(),
-  MONGO_DB_NAME: z.string().default('2in'),
+  // Gateway = same host as the indexer for testnet — the previous default
+  // (indexer-storage-turbo.0g.ai, no `-testnet-`) is the mainnet gateway
+  // and returns "File not found" for testnet uploads.
+  STORAGE_GATEWAY: z.string().default('https://indexer-storage-testnet-turbo.0g.ai'),
+  // FixedPriceFlow contract address for the 0G storage flow (KV writes
+  // get bundled into one tx per flush via `Batcher.exec()`). Required
+  // when ZeroGKvBackend is active. Per the Galileo turbo deployment the
+  // canonical value is documented in 0G docs — paste it here.
+  // Fallback FixedPriceFlow address — only used if the storage node's
+  // /status endpoint can't be reached at boot. Real value is auto-resolved
+  // from `indexer.selectNodes(...)[0].getStatus().networkIdentity.flowAddress`
+  // (currently 0x22e03a6a89b950f1c82ec5e74f8eca321a105296 on Galileo turbo).
+  STORAGE_FLOW_ADDRESS: z.string()
+    .regex(/^0x[a-fA-F0-9]{40}$/, 'STORAGE_FLOW_ADDRESS must be a 0x… address')
+    .default('0x22e03a6a89b950f1c82ec5e74f8eca321a105296'),
+  // How many storage-node replicas to write to per KV batch. 1 is fine
+  // for hackathon demo; production usually wants 3.
+  STORAGE_REPLICAS: z.coerce.number().int().min(1).max(10).default(1),
 
   // Chain (TwinINFT). Without CHAIN_CONTRACT_ADDRESS, /api/chain/* serves
   // mock state so the demo works without a deployed contract.
