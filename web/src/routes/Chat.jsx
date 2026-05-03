@@ -652,8 +652,20 @@ async function runMediaTool(toolName, attachment, goal, setExtension) {
     },
   ]);
 
+  // Some media tools (image.edit, video.*) can run 60–180 s, which exceeds
+  // Render free tier's ~100 s request timeout — the server completes the
+  // work and writes the output to /tmp/uploads (which the Library reads),
+  // but the proxy cuts the HTTP response so the client never receives it.
+  // We race the fetch with a 100 s timer; on timeout we give the user a
+  // useful message that points them at the Library where the result is.
+  const longRunner = toolName === 'image.edit' || toolName.startsWith('video.');
+  const TIMEOUT_MS = longRunner ? 100_000 : 60_000;
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('TIMEOUT_LIBRARY_FALLBACK')), TIMEOUT_MS);
+  });
+
   try {
-    const res = await toolsApi.invoke(toolName, input);
+    const res = await Promise.race([toolsApi.invoke(toolName, input), timeoutPromise]);
     const out = res?.result ?? res;
     setExtension((ext) =>
       ext.map((m) =>
@@ -668,6 +680,14 @@ async function runMediaTool(toolName, attachment, goal, setExtension) {
       )
     );
   } catch (err) {
+    const elapsedSec = ((Date.now() - startedAt) / 1000).toFixed(0);
+    const isTimeout = err?.message === 'TIMEOUT_LIBRARY_FALLBACK';
+    const intro = isTimeout
+      ? [
+          `${toolName} ran past the request timeout (${elapsedSec}s). ` +
+          `The output usually lands in your Library — open it from the rail to check.`,
+        ]
+      : [`${toolName} failed: ${err.message ?? 'unknown error'}`];
     setExtension((ext) =>
       ext.map((m) =>
         m.ts === slot && m.__pendingTool === toolName
@@ -675,7 +695,7 @@ async function runMediaTool(toolName, attachment, goal, setExtension) {
               kind: 'agent',
               from: 'director',
               ts: slot,
-              body: { intro: [`${toolName} failed: ${err.message ?? 'unknown error'}`] },
+              body: { intro },
             }
           : m
       )
