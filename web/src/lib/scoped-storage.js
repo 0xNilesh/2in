@@ -58,3 +58,48 @@ export function removeScoped(name) {
   if (typeof window === 'undefined') return;
   try { window.localStorage.removeItem(scopedKey(name)); } catch { /* ignore */ }
 }
+
+const UNSCOPED_PREFIX = '2in:_unscoped:';
+
+/** True when any pre-auth `_unscoped:*` keys are sitting in localStorage —
+ *  e.g. user finished onboarding before AuthScope set the active address.
+ *  We migrate those into the user's wallet scope on first sync. */
+export function hasUnscopedData() {
+  if (typeof window === 'undefined') return false;
+  try {
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const k = window.localStorage.key(i);
+      if (k && k.startsWith(UNSCOPED_PREFIX)) return true;
+    }
+  } catch { /* ignore */ }
+  return false;
+}
+
+/** Move every `2in:_unscoped:KEY` into `2in:<active-address>:KEY` so the
+ *  user's onboarding writes (mints, twin, corpus) end up under their
+ *  wallet namespace. Skips entries where the scoped key already exists. */
+export function migrateUnscopedToActive() {
+  if (typeof window === 'undefined') return;
+  const addr = getActiveAddress();
+  if (!addr) return;
+  try {
+    const toMove = [];
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const k = window.localStorage.key(i);
+      if (!k || !k.startsWith(UNSCOPED_PREFIX)) continue;
+      toMove.push(k);
+    }
+    for (const oldKey of toMove) {
+      const name = oldKey.slice(UNSCOPED_PREFIX.length);
+      const newKey = `2in:${addr}:${name}`;
+      const existing = window.localStorage.getItem(newKey);
+      if (existing == null) {
+        const value = window.localStorage.getItem(oldKey);
+        if (value != null) window.localStorage.setItem(newKey, value);
+      }
+      window.localStorage.removeItem(oldKey);
+    }
+    // eslint-disable-next-line no-console
+    if (toMove.length > 0) console.info(`[scope] migrated ${toMove.length} unscoped key(s) → 2in:${addr}:*`);
+  } catch { /* ignore */ }
+}
