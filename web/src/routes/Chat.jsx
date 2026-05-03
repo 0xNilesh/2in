@@ -18,7 +18,7 @@ import { useThreads, getThreadSync, deriveTitle } from '../hooks/useThreads.js';
 import { getTwinId } from '../data/specialists.js';
 import { useThreadSummary } from '../hooks/useThreadSummary.js';
 import { ROUTES } from '../lib/routes.js';
-import { taskApi, memoryApi, chatApi, toolsApi, uploadApi, apiUrl } from '../lib/api.js';
+import { taskApi, memoryApi, chatApi, toolsApi, uploadApi, apiUrl, absolutize } from '../lib/api.js';
 import { pushToast } from '../hooks/useToasts.js';
 
 const EXT_KEY = '2in:thread-ext';
