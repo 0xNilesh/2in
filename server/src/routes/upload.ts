@@ -22,10 +22,11 @@ async function ensureDir(): Promise<void> {
   if (!existsSync(UPLOAD_DIR)) await mkdir(UPLOAD_DIR, { recursive: true });
 }
 
-function publicUrl(req: FastifyRequest, filename: string): string {
-  const proto = (req.headers['x-forwarded-proto'] as string) ?? req.protocol;
-  const host = (req.headers['x-forwarded-host'] as string) ?? req.headers.host ?? 'localhost';
-  return `${proto}://${host}/api/upload/file/${encodeURIComponent(filename)}`;
+function publicUrl(_req: FastifyRequest, filename: string): string {
+  // Return a server-relative path. The client wraps it with VITE_API_BASE
+  // (apiUrl helper) so the link points at the right backend regardless of
+  // where the request originated — no need to peek at x-forwarded-host.
+  return `/api/upload/file/${encodeURIComponent(filename)}`;
 }
 
 function safeExt(filename: string, mimeType: string | undefined): string {
@@ -225,10 +226,7 @@ export function makeOutputPath(ext: string): { path: string; filename: string } 
   return { path: join(UPLOAD_DIR, filename), filename };
 }
 
-export function uploadPublicUrl(req: FastifyRequest | { headers: Record<string, string | undefined>; protocol: string }, filename: string): string {
-  // Used by media tools to construct the same URL shape as POST /upload.
-  const headers = (req as { headers: Record<string, string | undefined> }).headers ?? {};
-  const proto = (headers['x-forwarded-proto'] as string) ?? (req as { protocol: string }).protocol ?? 'http';
-  const host = (headers['x-forwarded-host'] as string) ?? headers.host ?? 'localhost';
-  return `${proto}://${host}/api/upload/file/${encodeURIComponent(filename)}`;
+export function uploadPublicUrl(_req: unknown, filename: string): string {
+  // Server returns relative paths; the client wraps with VITE_API_BASE.
+  return `/api/upload/file/${encodeURIComponent(filename)}`;
 }

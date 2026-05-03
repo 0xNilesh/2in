@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { PageHeader } from '../components/PageHeader.jsx';
 import { StatusPill } from '../components/StatusPill.jsx';
-import { toolsApi, uploadApi } from '../lib/api.js';
+import { toolsApi, uploadApi, absolutize } from '../lib/api.js';
 import {
   MAINNET_REQUIRED_TOOLS,
   MAINNET_PENDING_TOOLS,
@@ -296,7 +296,7 @@ function Spinner() {
 
 function ResultView({ result }) {
   const r = result?.result ?? result;
-  const url = r?.outputUrl ?? r?.url ?? null;
+  const url = absolutize(r?.outputUrl ?? r?.url ?? null);
   const kind = url ? guessMediaKind(url) : null;
   return (
     <div style={{ marginTop: 8 }}>

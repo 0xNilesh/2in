@@ -680,7 +680,9 @@ function detectMediaToolFromIntent(userText = '', attachments = []) {
 
 async function runMediaTool(toolName, attachment, goal, setExtension) {
   // Per-tool input shape — pick sensible defaults; advanced options later.
-  const mk = (extra = {}) => ({ fileUrl: attachment.url, ...extra });
+  // The Zod `z.string().url()` on tool inputs requires absolute URLs;
+  // server-issued attachment URLs are now relative — absolutize first.
+  const mk = (extra = {}) => ({ fileUrl: absolutize(attachment.url), ...extra });
   const inputs = {
     'image.edit':       mk({ instruction: goal }),
     'image.resize':     mk({ width: 1080, format: 'jpg' }),

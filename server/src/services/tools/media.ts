@@ -26,14 +26,13 @@ import { ToolError, type Tool, type ToolContext } from './types.js';
 
 const ASPECTS = ['9:16', '1:1', '16:9'] as const;
 
-// Build the public URL the same way the upload route does, but without a
-// FastifyRequest. We rely on PUBLIC_BASE_URL env (or fall back to localhost).
+// Return a server-relative path. The client wraps it with VITE_API_BASE
+// (apiUrl helper) so the link always points at the right backend host —
+// localhost in dev, the Render URL in prod — without us needing to know
+// our own public URL at tool-runtime.
 function publicUrl(filename: string, ctx: ToolContext): string {
-  // ctx.log carries no req. Use process env.
-  const base = process.env.PUBLIC_BASE_URL?.replace(/\/$/, '')
-    ?? `http://localhost:${process.env.PORT ?? 3001}`;
   void ctx;
-  return `${base}/api/upload/file/${encodeURIComponent(filename)}`;
+  return `/api/upload/file/${encodeURIComponent(filename)}`;
 }
 
 // ====================== VIDEO TOOLS ======================

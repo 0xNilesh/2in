@@ -6,7 +6,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { PageHeader } from '../components/PageHeader.jsx';
-import { uploadApi } from '../lib/api.js';
+import { uploadApi, absolutize } from '../lib/api.js';
 import { pushToast } from '../hooks/useToasts.js';
 
 const KIND_LABEL = {
@@ -187,14 +187,14 @@ function FileCard({ file, onCopyUrl, onRemove }) {
       >
         {file.kind === 'image' ? (
           <img
-            src={file.url}
+            src={absolutize(file.url)}
             alt={file.name}
             loading="lazy"
             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
           />
         ) : file.kind === 'video' ? (
           <video
-            src={file.url}
+            src={absolutize(file.url)}
             preload="metadata"
             muted
             playsInline
@@ -248,7 +248,7 @@ function FileCard({ file, onCopyUrl, onRemove }) {
         <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
           <a
             className="btn"
-            href={file.url}
+            href={absolutize(file.url)}
             target="_blank"
             rel="noreferrer"
             style={{ padding: '4px 8px', fontSize: 10.5, flex: 1, textAlign: 'center' }}
@@ -257,7 +257,7 @@ function FileCard({ file, onCopyUrl, onRemove }) {
           </a>
           <a
             className="btn"
-            href={file.url}
+            href={absolutize(file.url)}
             download={file.name}
             style={{ padding: '4px 8px', fontSize: 10.5, flex: 1, textAlign: 'center' }}
           >
@@ -266,7 +266,7 @@ function FileCard({ file, onCopyUrl, onRemove }) {
           <button
             type="button"
             className="btn"
-            onClick={() => onCopyUrl(file.url)}
+            onClick={() => onCopyUrl(absolutize(file.url))}
             style={{ padding: '4px 8px', fontSize: 10.5 }}
             title="Copy URL"
           >

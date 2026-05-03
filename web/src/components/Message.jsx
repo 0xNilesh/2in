@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react';
 import { Avatar } from './Avatar.jsx';
 import { TaskCard } from './TaskCard.jsx';
 import { getSpecialist } from '../data/specialists.js';
+import { absolutize } from '../lib/api.js';
 
 // Extract plain text from any body shape so we can copy / save it.
 function bodyToText(body) {
@@ -149,7 +150,7 @@ function ToolRunningInline({ tool, startedAt }) {
 }
 
 function ToolResultCard({ tool, input, output }) {
-  const url = output?.outputUrl ?? output?.url ?? null;
+  const url = absolutize(output?.outputUrl ?? output?.url ?? null);
   const kind = url ? guessMediaKind(url) : null;
   return (
     <div
@@ -241,15 +242,15 @@ export function Message({ msg, onSavePreference }) {
             <div style={{ marginTop: msg.text ? 8 : 0, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {msg.attachments.map((a) => (
                 a.kind === 'image' ? (
-                  <img key={a.filename} src={a.url} alt={a.originalFilename}
+                  <img key={a.filename} src={absolutize(a.url)} alt={a.originalFilename}
                     style={{ maxWidth: 220, maxHeight: 160, borderRadius: 8, objectFit: 'cover' }} />
                 ) : a.kind === 'video' ? (
-                  <video key={a.filename} src={a.url} controls
+                  <video key={a.filename} src={absolutize(a.url)} controls
                     style={{ maxWidth: 260, maxHeight: 180, borderRadius: 8, background: '#000' }} />
                 ) : a.kind === 'audio' ? (
-                  <audio key={a.filename} src={a.url} controls style={{ maxWidth: 260 }} />
+                  <audio key={a.filename} src={absolutize(a.url)} controls style={{ maxWidth: 260 }} />
                 ) : (
-                  <a key={a.filename} href={a.url} target="_blank" rel="noreferrer"
+                  <a key={a.filename} href={absolutize(a.url)} target="_blank" rel="noreferrer"
                     style={{ color: 'var(--peach)', fontSize: 12, textDecoration: 'underline' }}>
                     {a.originalFilename}
                   </a>

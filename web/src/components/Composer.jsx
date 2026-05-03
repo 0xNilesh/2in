@@ -7,7 +7,7 @@
 // strip above the textarea showing the upload(s); clicking ✕ removes one.
 
 import { useEffect, useRef, useState } from 'react';
-import { uploadApi } from '../lib/api.js';
+import { uploadApi, absolutize } from '../lib/api.js';
 import { pushToast } from '../hooks/useToasts.js';
 
 function kindOf(mime) {
@@ -97,7 +97,7 @@ export function Composer({ placeholder = 'Message 2in', onSend, disabled = false
                 }}
               >
                 {a.kind === 'image' ? (
-                  <img src={a.url} alt={a.originalFilename} style={{ width: 24, height: 24, objectFit: 'cover', borderRadius: 4 }} />
+                  <img src={absolutize(a.url)} alt={a.originalFilename} style={{ width: 24, height: 24, objectFit: 'cover', borderRadius: 4 }} />
                 ) : (
                   <span style={{ display: 'inline-block', width: 24, height: 24, lineHeight: '24px', textAlign: 'center', fontSize: 13, color: 'var(--peach)' }}>
                     {a.kind === 'video' ? '▶' : a.kind === 'audio' ? '♪' : '◌'}

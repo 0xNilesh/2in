@@ -11,6 +11,17 @@ export function apiUrl(path) {
   return `${BASE}${path}`;
 }
 
+/** Absolutize a server-issued URL. The server now returns RELATIVE
+ *  /api/upload/file/… paths (so it never has to peek at x-forwarded-host
+ *  or hardcode localhost). On the client we expand them with VITE_API_BASE.
+ *  Pass-through for already-absolute URLs (http://, https://, data:, blob:). */
+export function absolutize(u) {
+  if (!u) return u;
+  if (/^(https?:|data:|blob:)/i.test(u)) return u;
+  if (u.startsWith('/')) return `${BASE}${u}`;
+  return u;
+}
+
 function url(path) {
   return `${BASE}${path}`;
 }
