@@ -498,7 +498,7 @@ code); switch to Fly.io free or Railway to remove it.
 
 | Name | Role | Telegram | X |
 |---|---|---|---|
-| _Nilesh_ | _Dev_ | _@nileshgupta46_ | _@0xnilesj_ |
+| _Nilesh_ | _Dev_ | _@nileshgupta46_ | _@0xnilesh_ |
 
 _Add your team here before submission._
 
