@@ -18,7 +18,7 @@ import { useThreads, getThreadSync, deriveTitle } from '../hooks/useThreads.js';
 import { getTwinId } from '../data/specialists.js';
 import { useThreadSummary } from '../hooks/useThreadSummary.js';
 import { ROUTES } from '../lib/routes.js';
-import { taskApi, memoryApi, chatApi, toolsApi, apiUrl } from '../lib/api.js';
+import { taskApi, memoryApi, chatApi, toolsApi, uploadApi, apiUrl } from '../lib/api.js';
 import { pushToast } from '../hooks/useToasts.js';
 
 const EXT_KEY = '2in:thread-ext';
@@ -682,10 +682,43 @@ async function runMediaTool(toolName, attachment, goal, setExtension) {
   } catch (err) {
     const elapsedSec = ((Date.now() - startedAt) / 1000).toFixed(0);
     const isTimeout = err?.message === 'TIMEOUT_LIBRARY_FALLBACK';
+
+    // On timeout, the server has almost certainly finished writing the
+    // result to /tmp/uploads but the proxy cut the response. Poll the
+    // upload list a few times — any file with mtime > startedAt of the
+    // right kind is overwhelmingly likely to be ours. If we find it,
+    // render as a normal toolResult so the user sees the output inline
+    // instead of having to dig through the Library.
+    if (isTimeout) {
+      const expectedKind = toolName.startsWith('video.') ? 'video' : 'image';
+      const recovered = await pollLibraryForResult({ startedAt, expectedKind });
+      if (recovered) {
+        setExtension((ext) =>
+          ext.map((m) =>
+            m.ts === slot && m.__pendingTool === toolName
+              ? {
+                  kind: 'agent',
+                  from: 'director',
+                  ts: slot,
+                  body: {
+                    toolResult: {
+                      tool: toolName,
+                      input,
+                      output: { outputUrl: recovered.url, filename: recovered.name, sizeBytes: recovered.sizeBytes, _recovered: true },
+                    },
+                  },
+                }
+              : m
+          )
+        );
+        return;
+      }
+    }
+
     const intro = isTimeout
       ? [
-          `${toolName} ran past the request timeout (${elapsedSec}s). ` +
-          `The output usually lands in your Library — open it from the rail to check.`,
+          `${toolName} ran past the request timeout (${elapsedSec}s) and we couldn't recover the file from Library. ` +
+          `Open Library from the rail — it usually appears within ~30s of the server finishing.`,
         ]
       : [`${toolName} failed: ${err.message ?? 'unknown error'}`];
     setExtension((ext) =>
@@ -701,4 +734,23 @@ async function runMediaTool(toolName, attachment, goal, setExtension) {
       )
     );
   }
+}
+
+/** Poll /api/upload/list for a freshly-written file matching the expected
+ *  kind (image / video) with mtime newer than `startedAt`. Returns the
+ *  best match or null. Polls up to 6 × 5 s = 30 s total. */
+async function pollLibraryForResult({ startedAt, expectedKind, attempts = 6, intervalMs = 5_000 }) {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const list = await uploadApi.list();
+      const files = Array.isArray(list?.files) ? list.files : [];
+      const candidates = files
+        .filter((f) => (f.kind ?? '').toLowerCase() === expectedKind)
+        .filter((f) => Number(f.mtime ?? 0) >= startedAt)
+        .sort((a, b) => Number(b.mtime ?? 0) - Number(a.mtime ?? 0));
+      if (candidates[0]) return candidates[0];
+    } catch { /* swallow — try again */ }
+    if (i < attempts - 1) await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  return null;
 }
