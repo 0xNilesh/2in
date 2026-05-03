@@ -20,15 +20,6 @@ function shortAddr(a) {
   return a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '—';
 }
 
-// True when the user has run the Settings → Authorize orchestrator flow.
-// Settings writes this flag on a confirmed delegateAccess tx and
-// dispatches `2in:delegated-changed` for in-tab subscribers; cross-tab
-// updates come through the native `storage` event.
-function isDelegated() {
-  try { return window.localStorage.getItem('2in:delegated') === '1'; }
-  catch { return false; }
-}
-
 // Persisted collapse state per section. Default the team to closed since the
 // roster is 8 long and direct subagent chat is the rarer path.
 const COLLAPSE_KEY = '2in:rail:collapsed';
@@ -94,23 +85,10 @@ export function Rail() {
   const { threads, createThread } = useThreads();
   const [collapsed, setCollapsed] = useState(loadCollapsed);
   const auth = useAuth();
-  const [delegated, setDelegated] = useState(() => isDelegated());
 
   useEffect(() => {
     try { window.localStorage.setItem(COLLAPSE_KEY, JSON.stringify(collapsed)); } catch {}
   }, [collapsed]);
-
-  // Keep the delegated pill in sync with the authorize flow in Settings
-  // (same-tab via custom event) and with cross-tab logout/reset (storage).
-  useEffect(() => {
-    const sync = () => setDelegated(isDelegated());
-    window.addEventListener('storage', sync);
-    window.addEventListener('2in:delegated-changed', sync);
-    return () => {
-      window.removeEventListener('storage', sync);
-      window.removeEventListener('2in:delegated-changed', sync);
-    };
-  }, []);
 
   const toggle = (key) => () => setCollapsed((s) => ({ ...s, [key]: !s[key] }));
 
@@ -208,7 +186,6 @@ export function Rail() {
             <div className="a">galileo · 16602</div>
           </div>
         </div>
-        {delegated ? <span className="deleg-pill">delegated</span> : null}
       </footer>
     </aside>
   );

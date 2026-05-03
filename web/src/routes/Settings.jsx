@@ -1,16 +1,13 @@
-// Settings — wallet · delegate · runtime · sources.
+// Settings — wallet · runtime · sources.
 //
 // What works today:
 //   - Wallet → Disconnect (real Privy logout + redirect)
-//   - Delegate → Authorize orchestrator (real delegateAccess on the
-//     REAL master tokenId from 2in:mints — not the static demo number)
 //   - Danger zone → Reset everything (wipes localStorage + server memory
 //     + Privy session)
 //
 // Everything else is visibly disabled with a `soon` suffix on its action
 // button so the surface is honest about what we ship today vs. roadmap:
 //   - Handle edit
-//   - Auto-snapshot threshold adjust
 //   - Private mode toggle (TeeML routing isn't wired)
 //   - Multichain switch (only Galileo is supported)
 //   - 8 social / document source connectors
@@ -18,67 +15,10 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageHeader } from '../components/PageHeader.jsx';
-import { StatusPill } from '../components/StatusPill.jsx';
 import { useAuth } from '../hooks/useAuth.js';
-import { useViemWalletClient } from '../lib/privy-signer.js';
-import { isChainConfigured, chainConfig, getExplorerTxUrl } from '../lib/chain.js';
-import { TWIN_INFT_ABI } from '../lib/abi/twin-nft.js';
-import { chainApi, apiUrl } from '../lib/api.js';
+import { apiUrl } from '../lib/api.js';
 import { pushToast } from '../hooks/useToasts.js';
 import { getTwinId } from '../data/specialists.js';
-
-const ORCHESTRATOR_DELEGATE = '0x91ab2f7d0000000000000000000000000000f7d1'; // demo hot wallet placeholder (40 hex chars, lowercase — viem-strict)
-
-function getMasterTokenId() {
-  try {
-    const m = JSON.parse(window.localStorage.getItem('2in:mints') ?? '{}');
-    return m.master?.tokenId ?? null;
-  } catch { return null; }
-}
-
-function useDelegateAuth() {
-  const { walletClient, address } = useViemWalletClient();
-  const [status, setStatus] = useState('idle'); // idle · submitting · confirmed · failed
-  const [txHash, setTxHash] = useState(null);
-  const [error, setError] = useState(null);
-
-  const masterId = getMasterTokenId();
-
-  const authorize = async () => {
-    if (!masterId) {
-      setError('No master twin minted yet — finish onboarding first');
-      setStatus('failed');
-      return;
-    }
-    setStatus('submitting');
-    setError(null);
-    setTxHash(null);
-    try {
-      let hash;
-      if (walletClient && isChainConfigured()) {
-        hash = await walletClient.writeContract({
-          address: chainConfig.contractAddress,
-          abi: TWIN_INFT_ABI,
-          functionName: 'delegateAccess',
-          args: [BigInt(masterId), ORCHESTRATOR_DELEGATE],
-        });
-      }
-      const res = await chainApi.delegate(Number(masterId), ORCHESTRATOR_DELEGATE, hash);
-      setTxHash(res.txHash);
-      setStatus('confirmed');
-      // Persist the delegated flag so Rail's footer pill reflects reality.
-      try {
-        window.localStorage.setItem('2in:delegated', '1');
-        window.dispatchEvent(new Event('2in:delegated-changed'));
-      } catch { /* ignore */ }
-    } catch (err) {
-      setError(err.message ?? 'delegate_failed');
-      setStatus('failed');
-    }
-  };
-
-  return { status, txHash, error, authorize, address, masterId };
-}
 
 // Wipe everything that ties this browser to a particular twin: localStorage
 // keys (twin, threads, thread-ext, onboarding, memory cache, task caches,
@@ -231,7 +171,6 @@ const SOURCES = [
 ];
 
 export default function Settings() {
-  const delegate = useDelegateAuth();
   const auth = useAuth();
   const nav = useNavigate();
   const [resetting, setResetting] = useState(false);
@@ -260,7 +199,7 @@ export default function Settings() {
 
   return (
     <>
-      <PageHeader title="Settings" sub="Wallet · delegate · runtime mode" />
+      <PageHeader title="Settings" sub="Wallet · runtime mode" />
       <div className="scroll">
         <div className="page page-narrow">
 
@@ -288,62 +227,6 @@ export default function Settings() {
               sub="Custom display name (ENS or arbitrary)"
               value={shortAddr}
               action="Edit"
-            />
-          </div>
-
-          <div className="label-mono" style={{ margin: '24px 0 10px' }}>Delegate</div>
-          <div className="card" style={{ padding: 0 }}>
-            <div className="settings-row">
-              <div className="k">
-                Orchestrator hot wallet
-                <span className="s">delegateAccess(...) lets the team run 24/7 without you signing each tick</span>
-              </div>
-              <div className="v" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <span>{ORCHESTRATOR_DELEGATE.slice(0, 6)}…{ORCHESTRATOR_DELEGATE.slice(-4)}</span>
-                {delegate.masterId ? (
-                  <span style={{ fontSize: 10.5, color: 'var(--text-faint)', fontFamily: 'Geist Mono, monospace' }}>
-                    on tokenId #{delegate.masterId}
-                  </span>
-                ) : (
-                  <span style={{ fontSize: 10.5, color: 'var(--amber)' }}>
-                    no master minted — finish onboarding
-                  </span>
-                )}
-                {delegate.txHash ? (
-                  <a
-                    href={getExplorerTxUrl(delegate.txHash)}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ color: 'var(--peach)', fontSize: 10.5 }}
-                  >
-                    {delegate.txHash.slice(0, 8)}…{delegate.txHash.slice(-4)} ↗
-                  </a>
-                ) : null}
-                {delegate.error ? (
-                  <span style={{ color: 'var(--red)', fontSize: 11 }}>{delegate.error}</span>
-                ) : null}
-              </div>
-              {delegate.status === 'confirmed' ? (
-                <StatusPill color="mint">authorized</StatusPill>
-              ) : delegate.status === 'submitting' ? (
-                <StatusPill color="amber">signing…</StatusPill>
-              ) : delegate.status === 'failed' ? (
-                <button className="btn" onClick={delegate.authorize}>Retry</button>
-              ) : (
-                <button
-                  className="btn btn-peach"
-                  onClick={delegate.authorize}
-                  disabled={!delegate.masterId}
-                  style={{ opacity: delegate.masterId ? 1 : 0.55, cursor: delegate.masterId ? 'pointer' : 'not-allowed' }}
-                  title={delegate.masterId ? 'Sign delegateAccess on chain' : 'Mint your master twin during onboarding first'}
-                >Authorize orchestrator</button>
-              )}
-            </div>
-            <SoonRow
-              label="Auto-snapshot threshold"
-              sub="Memory delta that triggers updateMetadata on chain"
-              value="3 entries · 24h (default)"
-              action="Adjust"
             />
           </div>
 
