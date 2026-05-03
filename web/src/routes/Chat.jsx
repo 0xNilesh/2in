@@ -96,6 +96,68 @@ function ChatBody({ threadId, twin, seed, thread, onRename, onTouch, onNewChat, 
     chatApi.mode().then(setMode).catch(() => setMode(null));
   }, []);
 
+  // Resume orphaned tool placeholders. If we land on this thread (mount or
+  // navigation) and find a `toolRunning` message older than 100 s, the
+  // original runMediaTool Promise is dead (proxy cut, page reload, etc.).
+  // Kick the same Library-poll recovery so the user gets the result inline
+  // instead of an eternal spinner. Runs once per mount per matching slot.
+  const resumedSlotsRef = useRef(new Set());
+  useEffect(() => {
+    const stale = extension.filter((m) => {
+      const r = m?.body?.toolRunning;
+      if (!r || !r.tool) return false;
+      const age = Date.now() - (r.startedAt ?? 0);
+      return age > 100_000 && !resumedSlotsRef.current.has(m.ts);
+    });
+    if (stale.length === 0) return;
+    for (const m of stale) {
+      resumedSlotsRef.current.add(m.ts);
+      const { tool, startedAt } = m.body.toolRunning;
+      const expectedKind = tool.startsWith('video.') ? 'video' : 'image';
+      const slot = m.ts;
+      void (async () => {
+        const recovered = await pollLibraryForResult({ startedAt, expectedKind, attempts: 4, intervalMs: 4_000 });
+        if (recovered) {
+          setExtension((ext) =>
+            ext.map((x) =>
+              x.ts === slot && x?.body?.toolRunning
+                ? {
+                    kind: 'agent',
+                    from: 'director',
+                    ts: slot,
+                    body: {
+                      toolResult: {
+                        tool,
+                        input: {},
+                        output: { outputUrl: recovered.url, filename: recovered.name, sizeBytes: recovered.sizeBytes, _recovered: true },
+                      },
+                    },
+                  }
+                : x
+            )
+          );
+        } else {
+          setExtension((ext) =>
+            ext.map((x) =>
+              x.ts === slot && x?.body?.toolRunning
+                ? {
+                    kind: 'agent',
+                    from: 'director',
+                    ts: slot,
+                    body: { intro: [
+                      `${tool} ran past the request timeout and we couldn't recover the file from Library. ` +
+                      `Open Library from the rail — it usually appears within ~30s of the server finishing.`,
+                    ]},
+                  }
+                : x
+            )
+          );
+        }
+      })();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [extension.length, threadId]);
+
   // Persist extension to localStorage whenever it changes.
   useEffect(() => {
     const all = readExt();
